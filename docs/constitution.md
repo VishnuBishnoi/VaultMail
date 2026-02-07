@@ -26,9 +26,9 @@ This constitution defines the immutable constraints, principles, and rules that 
 
 ### P-02: Zero Third-Party Server Dependency
 
-- **Statement**: The application **MUST NOT** connect to any server other than the user's configured email service provider(s).
-- **Rationale**: Every external connection is a potential data leak and a trust violation.
-- **Implications**: No REST API backends, no push notification relay servers, no remote config services. All features **MUST** function using only local resources and direct provider connections (IMAP/SMTP).
+- **Statement**: The application **MUST NOT** connect to any server other than the user's configured email service provider(s), except for provider-mandated authentication endpoints (e.g., OAuth authorization servers) and one-time model downloads that transmit no user data (see LG-01, LG-02).
+- **Rationale**: Every external connection is a potential data leak and a trust violation. The two exceptions are narrowly scoped: OAuth endpoints are required by the provider's own authentication flow, and model downloads transfer only static weight files with no user data sent.
+- **Implications**: No REST API backends, no push notification relay servers, no remote config services. All features **MUST** function using only local resources and direct provider connections (IMAP/SMTP). Model download policy is defined in the proposal (Section 3.4.1).
 
 ### P-03: Local-First AI
 

@@ -47,7 +47,7 @@ Build a privacy-first email client with the following characteristics:
 
 ### 3.1 Architecture
 
-A local-first email client that communicates **only** with the user's email service provider via standard IMAP/SMTP protocols. All intelligence features run on-device using local LLM inference.
+A local-first email client that communicates with the user's email service provider via standard IMAP/SMTP protocols. All intelligence features run on-device using local LLM inference. The only outbound connections are to the email provider (IMAP/SMTP/OAuth) and, optionally, a one-time model download (see Section 3.4.1).
 
 ```mermaid
 graph LR
@@ -73,7 +73,7 @@ graph LR
     style ESP fill:#e3f2fd,stroke:#1565c0
 ```
 
-No data flows to any other destination. The only network traffic is between the client and the user's email provider.
+No user data flows to any other destination. Aside from the email provider, the only other network traffic is a one-time AI model download from an approved source (see Section 3.4.1), which transmits no user data.
 
 ### 3.2 Core Value Proposition
 
