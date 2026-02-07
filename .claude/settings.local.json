@@ -1,0 +1,54 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init:*)",
+      "Bash(git commit:*)",
+      "Bash(git -C /Users/vishnudutt/email diff --stat)",
+      "Bash(git -C /Users/vishnudutt/email add:*)",
+      "Bash(git -C /Users/vishnudutt/email commit -m \"$\\(cat <<''EOF''\ndocs\\(constitution\\): add Section 6 — Spec Format Standard\n\nDefines mandatory document hierarchy \\(Constitution → Proposal → Spec →\nPlan → Tasks → Validation\\), lifecycle state machine \\(draft → review →\napproved → locked → deprecated\\), required section structures for specs,\nplans, and validation docs, requirement ID conventions \\(FR-, NFR-, AC-,\nG-, NG-, OQ-\\), and a reusable spec template. Renumbers sections 7-9.\n\nAddresses review feedback: spec format was undefined.\n\nCo-Authored-By: Claude \\(claude-opus-4-6\\) <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C /Users/vishnudutt/email commit -m \"$\\(cat <<''EOF''\ndocs: add operational policies and legal/licensing sections\n\nConstitution:\n- TC-06: Data retention, cache limits \\(attachment 500MB LRU, sync\n  window eviction\\), storage budgeting, mailbox size cap \\(50K supported,\n  100K functional\\)\n- Section 4 \\(Legal & Licensing\\): AI model license requirements with\n  candidate matrix, Gmail OAuth compliance \\(verification, scopes,\n  Limited Use policy\\), App Store privacy nutrition label, open-source\n  license compliance\n\nSpec:\n- Section 8: Storage & Data Retention \\(behavioral requirements\\)\n- Section 9: Legal & Compliance \\(references constitution\\)\n- Resolved OQ-05 \\(mailbox size: 50K supported, 100K degraded\\)\n- Bumped version to 1.1.0\n\nAddresses review feedback: operational policy gaps and licensing/legal\ngaps.\n\nCo-Authored-By: Claude \\(claude-opus-4-6\\) <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C /Users/vishnudutt/email commit -m \"$\\(cat <<''EOF''\ndocs\\(proposal\\): address four review gaps\n\n1. Gmail IMAP quirks \\(3.3.1\\): Label-as-folder mapping, dedup by\n   Message-ID, All Mail archive semantics, delete behavior, rate\n   limits \\(2.5GB/day, 5 connections\\), IDLE 25-min refresh, server\n   search bypass in favor of local index. Quirk table with mitigations.\n\n2. Model download policy \\(3.4.1\\): Clarifies that model downloads are\n   static asset transfers, not user-data transmissions. Defines\n   allowed sources \\(Hugging Face, local import, project CDN\\) and\n   prohibited sources. Requires URL/size/license disclosure, HTTPS,\n   resumable downloads, SHA-256 verification.\n\n3. Offline send queue \\(3.5\\): Full lifecycle state machine \\(Queued →\n   Sending → Sent/Failed\\), retry policy \\(5 retries, exponential\n   30s→2h, 72h max age\\), user visibility \\(Outbox section, per-message\n   status\\), error handling table by failure type.\n\n4. Threat model \\(Section 6\\): 10-threat matrix covering physical\n   access, MITM, token theft, DB tampering, model poisoning, memory\n   forensics, metadata leakage. Out-of-scope acknowledgment. User\n   security recommendations.\n\nBumped version to 1.1.0.\n\nCo-Authored-By: Claude \\(claude-opus-4-6\\) <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C /Users/vishnudutt/email commit -m \"$\\(cat <<''EOF''\ndocs\\(spec\\): address five product/scope review gaps\n\n1. Threading Algorithm \\(5.2.4\\): 5-step algorithm — parse\n   References/In-Reply-To, build reference graph, group by connected\n   components, subject-normalization fallback \\(strip Re:/Fwd: prefixes,\n   30-day window\\), thread metadata computation. Documents Gmail\n   mismatch handling \\(client is authoritative\\).\n\n2. Attachment Security \\(5.4.2 expanded\\): No auto-download for any\n   attachment \\(removed 5MB exception\\). No auto-open. QuickLook-only\n   sandboxed preview. Security warning table for executable file types.\n   Sandbox-only storage.\n\n3. HTML Rendering Safety \\(5.4.3\\): Remote images blocked by default\n   with per-message/per-sender opt-in. Tracking pixel detection and\n   stripping \\(1x1 images, known domains, hidden elements\\). Full HTML\n   sanitization table \\(script, iframe, form, event handlers, etc.\\).\n   WKWebView with JS disabled, no cookies/storage. Plain text fallback.\n\n4. Undo-Send Edge Cases \\(5.5.2 rewritten\\): Clarifies purely\n   client-side delay. Edge case table: app background \\(timer pauses\\),\n   app killed \\(saved as draft, not auto-sent\\), network loss \\(enters\n   offline queue\\), undo disabled \\(immediate send\\). Persistence\n   guarantee \\(written to SwiftData before countdown\\).\n\n5. Contacts Autocomplete Privacy \\(5.5.4\\): Data sourced exclusively\n   from synced email headers. No system Contacts access. No external\n   lookups. Per-account scoped cache. Cascade delete. No export.\n\nBumped version to 1.2.0.\n\nCo-Authored-By: Claude \\(claude-opus-4-6\\) <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C /Users/vishnudutt/email status)",
+      "Bash(git -C /Users/vishnudutt/email log --oneline -3)",
+      "Bash(git -C /Users/vishnudutt/email commit -m \"$\\(cat <<''EOF''\ndocs\\(foundation\\): address 8 review findings before spec lock\n\nF3: Gmail labels many-to-many model — EmailFolder join entity replaces\nsingle folderId FK; cascade delete rules updated for label semantics.\nF4: Add IMAP UID/UIDVALIDITY fields \\(Folder.uidValidity, EmailFolder.imapUID\\).\nF8: Folder type enum column annotated as Gmail V1 mapping.\nF5: Add sendState/sendRetryCount/sendQueuedDate to Email; outbox and\ndraft rows added to cache management table.\nF2: Split NFR-SEC-02 into iOS/macOS platform-specific encryption statements.\nF1: Document OAuth scope rationale \\(only scope Google provides for IMAP\\)\nand XOAUTH2 SASL mechanism requirement.\nF6: Add AI model size assumption and graceful degradation note.\nF7: Replace contradictory iPad MUST with adaptive layout SHOULD.\n\nCross-ref updates: account-management \\(OQ-04 resolved\\), email-sync\n\\(EmailFolder reference\\), email-composer \\(sendState reference\\),\nai-features \\(degradation cross-ref\\).\n\nCo-Authored-By: Claude \\(claude-opus-4-6\\) <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C /Users/vishnudutt/email commit -m \"$\\(cat <<''EOF''\ndocs\\(foundation\\): fix cascade delete Trash bug + add sendState enum\n\nFix FR-FOUND-03 cascade rule: removing Trash association with no other\nfolders now permanently deletes the email instead of incorrectly moving\nit to Archive. Add Section 5.5 Send State Enum table per SF-06.\n\nThree comments deferred \\(not constitutionally required\\): smart reply\ncache is on-demand by design, participants format matches existing\naddress field pattern, 72h rationale belongs in proposal per SF-01.\n\nCo-Authored-By: Claude \\(claude-opus-4-6\\) <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C /Users/vishnudutt/email commit -m \"$\\(cat <<''EOF''\ndocs\\(foundation\\): resolve all OQs, add field formats, smart reply note\n\nResolve OQ-03: background-fetch + IMAP IDLE only \\(push relay violates\nConstitution P-02\\). All open questions now resolved — spec eligible\nfor approved/locked status per SF-03.\n\nAdd Section 5.6: multi-value field serialization formats for\ntoAddresses, ccAddresses, bccAddresses \\(JSON string arrays\\),\nreferences \\(space-delimited per RFC 2822\\), and participants\n\\(JSON array of {name, email} objects\\).\n\nAdd explicit note that smart reply suggestions are generated\non-demand, not cached in the data model.\n\nCo-Authored-By: Claude \\(claude-opus-4-6\\) <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git add:*)",
+      "Bash(git status:*)",
+      "Bash(git checkout:*)",
+      "Bash(git cherry-pick:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(git -C /Users/vishnudutt/email log --oneline -20)",
+      "Bash(swift:*)",
+      "Bash(xcodebuild:*)",
+      "mcp__XcodeBuildMCP__scaffold_ios_project",
+      "mcp__XcodeBuildMCP__build_sim",
+      "mcp__XcodeBuildMCP__swift_package_build",
+      "mcp__XcodeBuildMCP__swift_package_test",
+      "mcp__XcodeBuildMCP__session-set-defaults",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npx:*)",
+      "Bash(git reset:*)",
+      "Bash(git restore:*)",
+      "Bash(find:*)",
+      "Bash(tree:*)",
+      "Bash(xargs:*)",
+      "Bash(git pull:*)",
+      "Bash(use cases only, never repositories directly.\"\n- PL-02: Clarify unified inbox + folder interaction — in Unified Inbox\n  mode, folder sidebar shows only unified Inbox. System folders and\n  labels are per-account; user must select an account to see its folders.\n- MC-01: Add Outbox + category tabs clause — when Outbox is selected,\n  category tabs are hidden \\(filtered by sendState, not aiCategory\\).\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  },
+  "enabledPlugins": {
+    "swiftui-expert@swiftui-expert-skill": true
+  },
+  "extraKnownMarketplaces": {
+    "swiftui-expert-skill": {
+      "source": {
+        "source": "github",
+        "repo": "AvdLee/SwiftUI-Agent-Skill"
+      }
+    }
+  }
+}
