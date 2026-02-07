@@ -1,9 +1,9 @@
 ---
 title: "Foundation — Specification"
-version: "1.3.0"
+version: "1.4.0"
 status: locked
 created: 2025-02-07
-updated: 2025-02-07
+updated: 2026-02-07
 authors:
   - Core Team
 reviewers: []
@@ -411,7 +411,7 @@ Refer to Constitution TC-06 for hard limits.
 | AI results (category, summary) | Tied to email lifecycle | Deleted with email | None (automatic) |
 | Search embeddings | Tied to email lifecycle | Deleted with email | None (automatic) |
 | AI models | No automatic limit | None | Manual delete in Settings |
-| Offline send queue | 72h max age per message | Failed after 72h; sent messages removed | User can retry or discard |
+| Offline send queue | 24h max age per message | Failed after 24h; sent messages removed | User can retry or discard |
 | Draft autosaves | Tied to composer lifecycle | Deleted when sent, discarded, or synced to Drafts folder | None (automatic) |
 
 ### 8.2 Storage Visibility
@@ -533,3 +533,4 @@ See [Proposal — Section 4](../../proposal.md#4-alternatives-considered) for ar
 | 1.1.0 | 2025-02-07 | Core Team | Address 8 review findings: Gmail labels many-to-many model (EmailFolder join entity), IMAP UID/UIDVALIDITY fields, macOS encryption nuance, OAuth scope rationale + XOAUTH2, outbox/draft storage, AI degradation note, iPad scope fix, folder enum annotation. |
 | 1.2.0 | 2025-02-07 | Core Team | Review round 2: Fix cascade delete Trash logic (prevent unintended resurrection into Archive); add sendState enum table (SF-06 compliance). |
 | 1.3.0 | 2025-02-07 | Core Team | Review round 3: Resolve OQ-03 (background-fetch per P-02, all OQs now resolved); add Section 5.6 multi-value field serialization formats; add smart reply on-demand note. Status → locked. |
+| 1.4.0 | 2026-02-07 | Core Team | Post-lock delta PL-01: Align offline send queue max age with Email Sync spec — changed from 72h to 24h. Rationale: stale queued emails are confusing and risk outdated context; 24h is a reasonable ceiling for unsent email. |

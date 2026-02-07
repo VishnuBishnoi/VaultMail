@@ -1,6 +1,6 @@
 ---
 title: "Email Sync — Specification"
-version: "1.1.0"
+version: "1.2.0"
 status: locked
 created: 2025-02-07
 updated: 2026-02-07
@@ -55,14 +55,17 @@ On first account setup, the client **MUST** perform a full sync:
    - `\Sent` → `sent`
    - `\Drafts` → `drafts`
    - `\Trash` → `trash`
-   - `\Jstrash` (Gmail Spam) → `spam`
+   - `\Junk` (Gmail Spam) → `spam`
    - `\All` (`[Gmail]/All Mail`) → **MUST NOT** be synced (redundant; contains all emails already in other folders)
    - `\Flagged` (`[Gmail]/Starred`) → `starred`
    - `\Important` → **MUST NOT** be synced as a folder; importance is a flag, not a mailbox
    - User-created Gmail labels → `custom`
-   - `[Gmail]/Archive` → `archive`
+
+   > **Note — Archive is virtual:** Gmail has no dedicated `[Gmail]/Archive` IMAP folder. "Archiving" in Gmail removes the `\Inbox` label, leaving the email only in `[Gmail]/All Mail`. Since All Mail is not synced (see above), the local "Archive" view is a virtual query: emails that were explicitly archived by the user are tracked via removal of their source-folder `EmailFolder` association. See FR-SYNC-10 Archive Behavior for details.
 
 2. **Email sync**: For each folder, fetch all email headers and bodies whose `INTERNALDATE` falls within the configured sync window (see Account Management FR-ACCT-02; default 30 days). Use IMAP `SEARCH SINCE <date>` to identify matching UIDs.
+
+   **Cross-folder deduplication**: Before creating a new `Email` entity, the client **MUST** check for an existing `Email` with the same `messageId` (RFC 2822 Message-ID) in the local store. If a match is found, the client **MUST** create only a new `EmailFolder` association linking the existing email to the current folder (and update flags if they differ). If no match is found, the client **MUST** create a new `Email` entity and its `EmailFolder` association. This ensures that emails appearing in multiple Gmail labels (e.g., Inbox + Starred) are stored as a single `Email` with multiple `EmailFolder` join entries.
 
 3. **Body format handling**: For each email, use `FETCH BODYSTRUCTURE` to determine MIME structure:
    - **MUST** fetch `text/plain` part → store in `Email.bodyPlain`
@@ -356,6 +359,7 @@ Bidirectional synchronization of email flags between local state and the IMAP se
 **Archive Behavior**
 
 - Archive **MUST** be implemented as IMAP `COPY` to `[Gmail]/All Mail` followed by `STORE +FLAGS (\Deleted)` and `EXPUNGE` from the source folder.
+- **Local state after archive**: The client **MUST** delete the `EmailFolder` association linking the email to the source folder. Since `[Gmail]/All Mail` is not synced, the email will have no remaining synced-folder associations. The email entity **MUST** be retained locally (not deleted) so it remains available in the conversation thread and search index. An "Archive" view **MUST** display emails that have been archived (i.e., emails with no remaining synced-folder associations that were not deleted or trashed).
 - Delete **MUST** move to Trash via IMAP `COPY` to `[Gmail]/Trash` followed by `STORE +FLAGS (\Deleted)` and `EXPUNGE` from the source folder. If already in Trash, delete permanently via `STORE +FLAGS (\Deleted)` and `EXPUNGE`.
 
 **Error Handling**
@@ -463,3 +467,4 @@ Refer to Foundation spec Section 6. This feature uses:
 |---------|------|--------|---------------|
 | 1.0.0 | 2025-02-07 | Core Team | Extracted from monolithic spec v1.2.0 sections 5.2 and 5.5.2 (send behavior). Threading algorithm from v1.2.0 section 5.2.4. |
 | 1.1.0 | 2026-02-07 | Core Team | Review round 1: Added G-XX/NG-XX IDs. Added FR-SYNC-08 (Attachments), FR-SYNC-09 (Connection Management), FR-SYNC-10 (Flag Sync). Expanded FR-SYNC-01 with folder discovery, body format handling, sync sequence diagram, sync window cross-ref. Expanded FR-SYNC-02 with progressive checkpointing, change detection details. Expanded FR-SYNC-03 with IDLE behavior, background refresh details. Expanded FR-SYNC-04 with token refresh cross-ref and Indexing definition. Inlined send queue lifecycle into FR-SYNC-07 (removed Proposal reference). Defined virtual Outbox. Added error handling to all FRs. Added NFR-SYNC-03 (Send Time), NFR-SYNC-04 (Memory), NFR-SYNC-05 (Security). Set NFR-SYNC-01 hard limit to 10s. Resolved all ambiguities. Status → locked. |
+| 1.2.0 | 2026-02-07 | Core Team | Post-lock compliance fixes: PL-01 — aligned Foundation spec to 24h queue age (Foundation v1.4.0). PL-02 — fixed `\Jstrash` typo → `\Junk` (RFC 6154). PL-03 — removed non-existent `[Gmail]/Archive` folder mapping; added virtual archive explanation and local state handling for archive operations. PL-04 — added explicit cross-folder deduplication strategy using `messageId`. |
