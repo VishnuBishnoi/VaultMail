@@ -1,6 +1,6 @@
 ---
 title: "Thread List — Specification"
-version: "1.1.0"
+version: "1.2.0"
 status: locked
 created: 2025-02-07
 updated: 2026-02-07
@@ -195,6 +195,7 @@ The client **MUST** display the following system folders in a sidebar or navigat
 - Custom Gmail labels **MUST** be displayed below system folders, sorted alphabetically.
 - Selecting a folder **MUST** update the thread list to show only threads in that folder.
 - The Outbox **MUST** display emails with `sendState ∈ {queued, sending, failed}` (see Email Sync FR-SYNC-07). Each Outbox row **MUST** show the send state and allow retry (for failed) or cancel (for queued).
+- When the Outbox folder is selected, category tabs **MUST** be hidden. Outbox emails are filtered by `sendState`, not `aiCategory`.
 
 **Account Switcher**
 
@@ -203,6 +204,7 @@ The client **MUST** display the following system folders in a sidebar or navigat
 - Selecting an account **MUST** switch the thread list to that account's Inbox.
 - The client **MUST** provide a "Unified Inbox" option that merges threads from all accounts, sorted by `latestDate`.
 - In unified view, each thread row **MUST** display an account indicator (colored dot or small avatar) showing which account the thread belongs to.
+- In Unified Inbox mode, the folder sidebar **MUST** display only the unified Inbox. System folders (Sent, Drafts, Trash, Spam, Starred) and custom labels are **not** shown in unified mode — they are per-account. To access a specific account's folders, the user **MUST** first select that account from the account switcher.
 
 **Error Handling**
 
@@ -298,20 +300,24 @@ Refer to Foundation spec Section 6. This feature uses:
 
 - `FetchThreadsUseCase` — fetches paginated, filtered, sorted threads from the repository
 - `SyncEmailsUseCase` — triggered by pull-to-refresh
+- `ArchiveThreadUseCase` — archives a thread (swipe right action)
+- `DeleteThreadUseCase` — deletes/trashes a thread (swipe left action)
 - `CategorizeEmailUseCase` — provides AI category badges (see AI Features spec); graceful fallback if unavailable
 
 ```mermaid
 flowchart TD
     TLV["ThreadListView"] -->|fetch| FTU["FetchThreadsUseCase"]
     TLV -->|pull-to-refresh| SEU["SyncEmailsUseCase"]
-    TLV -->|swipe archive| ER["EmailRepository.archive()"]
-    TLV -->|swipe delete| ER2["EmailRepository.delete()"]
+    TLV -->|swipe archive| ATU["ArchiveThreadUseCase"]
+    TLV -->|swipe delete| DTU["DeleteThreadUseCase"]
     FTU --> REPO["EmailRepositoryProtocol"]
     SEU --> REPO
+    ATU --> REPO
+    DTU --> REPO
     REPO --> SD["SwiftData Store"]
 ```
 
-**Note**: Per project architecture (CLAUDE.md), this feature uses the MV (Model-View) pattern with `@Observable` services and SwiftUI native state management. No ViewModels — view logic is in the SwiftUI views using `@State`, `@Environment`, and `.task` modifiers.
+**Note**: Per project architecture (CLAUDE.md), this feature uses the MV (Model-View) pattern with `@Observable` services and SwiftUI native state management. No ViewModels — view logic is in the SwiftUI views using `@State`, `@Environment`, and `.task` modifiers. Per Foundation FR-FOUND-01, views **MUST** call domain use cases only — never repositories directly.
 
 ---
 
@@ -369,3 +375,4 @@ flowchart TD
 |---------|------|--------|---------------|
 | 1.0.0 | 2025-02-07 | Core Team | Extracted from monolithic spec v1.2.0 section 5.3. |
 | 1.1.0 | 2026-02-07 | Core Team | Review round 1: Added G-XX/NG-XX IDs (SF-03). Expanded FR-TL-01 with thread row content table, timestamp format, pagination (25/page cursor-based), view states (loading/empty/error/offline), error handling. Expanded FR-TL-02 with category tab table, unread badges per tab, AI unavailability fallback, forums handling. Expanded FR-TL-03 with swipe action table, undo toast (5s), multi-select toolbar, batch action details, optimistic updates with revert, error handling. Renamed FR-TL-04 to include folder navigation: system folders table with Outbox (FR-SYNC-07), custom labels, account indicator in unified view. Expanded FR-TL-05 with compose FAB, folder navigation link. Added NFR-TL-03 (Accessibility: WCAG 2.1 AA, VoiceOver, Dynamic Type, color independence, Reduce Motion). Added NFR-TL-04 (Memory: ≤50MB target for 500+ threads). Expanded Data Model section with field usage table. Added architecture diagram with MV pattern note (no ViewModels). Expanded iOS platform section with adaptive layout, compose button, account switcher. Expanded macOS section with keyboard shortcuts, context menu, multi-select. Added alternatives (UIKit, category-as-screens). Status → locked. |
+| 1.2.0 | 2026-02-07 | Core Team | Post-lock compliance fixes: PL-01 — fixed architecture diagram to route swipe actions through ArchiveThreadUseCase/DeleteThreadUseCase instead of directly to EmailRepository (FR-FOUND-01 compliance); MV note now explicitly states "views call use cases only, never repositories directly". PL-02 — clarified that Unified Inbox mode hides folder sidebar (system folders are per-account; user must select an account to see its folders). MC-01 — added clause that Outbox disables category tabs (filtered by sendState, not aiCategory). |
