@@ -146,7 +146,7 @@ Refer to Foundation spec Section 6. This feature uses:
 
 | # | Question | Owner | Target Date |
 |---|----------|-------|-------------|
-| OQ-04 | Gmail IMAP access requires "Allow less secure apps" to be deprecated — confirm OAuth-based XOAUTH2 IMAP auth works reliably | Backend Lead | Pre-plan |
+| ~~OQ-04~~ | ~~Gmail IMAP access requires "Allow less secure apps" to be deprecated — confirm OAuth-based XOAUTH2 IMAP auth works reliably~~ **RESOLVED**: XOAUTH2 is the required IMAP/SMTP auth mechanism for Gmail. See Foundation spec Section 10.2. | Backend Lead | Resolved |
 
 ---
 

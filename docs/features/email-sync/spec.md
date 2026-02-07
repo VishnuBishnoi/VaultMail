@@ -177,7 +177,7 @@ Gmail's internal threading algorithm may produce different groupings than this R
 
 ## 5. Data Model
 
-Refer to Foundation spec Section 5 for Email, Folder, Thread, and Attachment entities. This feature reads/writes all of them plus manages sync state metadata (last UID, UIDVALIDITY per folder).
+Refer to Foundation spec Section 5 for Email, Folder, EmailFolder, Thread, and Attachment entities. This feature reads/writes all of them plus manages sync state metadata. `Folder.uidValidity` stores per-folder UIDVALIDITY; `EmailFolder.imapUID` stores per-folder IMAP UIDs (see Foundation Section 5.4).
 
 ---
 

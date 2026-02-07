@@ -120,7 +120,7 @@ The recipient autocomplete feature **MUST** operate entirely from locally synced
 
 ## 5. Data Model
 
-Refer to Foundation spec Section 5. This feature creates/updates Email entities (draft state) and reads contact cache entries from SwiftData.
+Refer to Foundation spec Section 5. This feature creates/updates Email entities (draft state, send queue state via `Email.sendState`) and reads contact cache entries from SwiftData. See Foundation Section 8.1 for outbox and draft retention policies.
 
 ---
 

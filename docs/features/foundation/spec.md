@@ -1,6 +1,6 @@
 ---
 title: "Foundation — Specification"
-version: "1.0.0"
+version: "1.1.0"
 status: draft
 created: 2025-02-07
 updated: 2025-02-07
@@ -63,9 +63,9 @@ This specification defines the shared architectural foundation for the privacy-f
 
 ### FR-FOUND-03: Data Model Cascade Deletes
 
-- Deleting an Account **MUST** cascade delete all associated Folders, Emails, Threads, Attachments, and SearchIndex entries.
-- Deleting a Folder **MUST** cascade delete all contained Emails.
-- Deleting an Email **MUST** cascade delete all associated Attachments.
+- Deleting an Account **MUST** cascade delete all associated Folders, EmailFolder associations, Emails, Threads, Attachments, and SearchIndex entries.
+- Deleting a Folder **MUST** remove all EmailFolder associations for that folder. If removing a folder association leaves an Email with no remaining associations, the Email **MUST** be moved to the archive folder (All Mail for Gmail) rather than deleted.
+- Deleting an Email **MUST** cascade delete all associated EmailFolder associations and Attachments.
 
 ---
 
@@ -115,9 +115,10 @@ This specification defines the shared architectural foundation for the privacy-f
 
 ### NFR-SEC-02: Data at Rest Encryption
 
-- All email data **MUST** be stored using SwiftData, which inherits iOS Data Protection (encrypted at rest when device is locked).
+- On **iOS**, all email data **MUST** be stored using SwiftData, which inherits iOS Data Protection (encrypted at rest when device is locked).
+- On **macOS**, data-at-rest protection relies on FileVault rather than per-file Data Protection classes. The client **SHOULD** recommend FileVault enablement during onboarding.
 - The client **SHOULD** support an optional app lock (biometric or passcode) as an additional layer.
-- AI models stored locally do not require encryption (they contain no user data).
+- AI models stored locally do not require encryption (they contain no user data), but the client **MUST** allow users to delete downloaded models via Settings.
 
 ### NFR-SEC-03: No Third-Party Connections
 
@@ -157,7 +158,7 @@ erDiagram
         bool isActive
     }
 
-    Folder ||--o{ Email : contains
+    Folder ||--o{ EmailFolder : contains
     Folder {
         string id PK
         string accountId FK
@@ -166,7 +167,16 @@ erDiagram
         int unreadCount
         int totalCount
         string folderType
+        int uidValidity
         date lastSyncDate
+    }
+
+    Email ||--o{ EmailFolder : labeled_in
+    EmailFolder {
+        string id PK
+        string emailId FK
+        string folderId FK
+        int imapUID
     }
 
     Email ||--o{ Attachment : has
@@ -174,7 +184,6 @@ erDiagram
     Email {
         string id PK
         string accountId FK
-        string folderId FK
         string threadId FK
         string messageId
         string inReplyTo
@@ -197,6 +206,9 @@ erDiagram
         string aiCategory
         string aiSummary
         int sizeBytes
+        string sendState
+        int sendRetryCount
+        date sendQueuedDate
     }
 
     Thread ||--o{ Email : contains
@@ -244,8 +256,10 @@ erDiagram
 
 ### 5.3 Folder Type Enum
 
-| Value | IMAP Mapping |
-|-------|-------------|
+The `folderType` values are provider-agnostic domain concepts. The IMAP mapping column below shows the **Gmail V1 provider mapping**. Future providers will define their own mappings for these standard folder types.
+
+| Value | Gmail IMAP Mapping (V1) |
+|-------|------------------------|
 | `inbox` | INBOX |
 | `sent` | [Gmail]/Sent Mail |
 | `drafts` | [Gmail]/Drafts |
@@ -254,6 +268,12 @@ erDiagram
 | `archive` | [Gmail]/All Mail |
 | `starred` | [Gmail]/Starred |
 | `custom` | User-created labels |
+
+### 5.4 IMAP Sync State Fields
+
+- `Folder.uidValidity`: The IMAP UIDVALIDITY value for this folder. If the server's UIDVALIDITY changes, the client **MUST** re-sync the entire folder (see Email Sync spec FR-SYNC-02).
+- `EmailFolder.imapUID`: The IMAP UID for this email within this specific folder. UIDs are folder-scoped in IMAP — the same email (by `messageId`) can have different UIDs in different folders.
+- These fields are critical for incremental sync correctness and **MUST** be populated during sync.
 
 ---
 
@@ -339,7 +359,7 @@ graph TD
 - **MUST** follow Apple Human Interface Guidelines.
 - **MUST** support iPhone screen sizes (SE to Pro Max).
 - **MUST** support both portrait and landscape orientations.
-- **MUST** support split-view and slide-over on iPad (if installed via Mac target is not applicable — but future iPad support should be considered in layout).
+- Layouts **SHOULD** use adaptive sizing patterns (e.g., `NavigationSplitView`) to ease future iPad support, but iPad is not in V1 scope.
 
 ### 7.2 macOS
 
@@ -365,6 +385,8 @@ Refer to Constitution TC-06 for hard limits.
 | AI results (category, summary) | Tied to email lifecycle | Deleted with email | None (automatic) |
 | Search embeddings | Tied to email lifecycle | Deleted with email | None (automatic) |
 | AI models | No automatic limit | None | Manual delete in Settings |
+| Offline send queue | 72h max age per message | Failed after 72h; sent messages removed | User can retry or discard |
+| Draft autosaves | Tied to composer lifecycle | Deleted when sent, discarded, or synced to Drafts folder | None (automatic) |
 
 ### 8.2 Storage Visibility
 
@@ -390,9 +412,11 @@ Refer to Constitution TC-06 for hard limits.
 
 ### 9.2 Data at Rest
 
-- All email data **MUST** be stored using SwiftData, which inherits iOS Data Protection (encrypted at rest when device is locked).
+- On **iOS**, SwiftData inherits iOS Data Protection (encrypted at rest when device is locked).
+- On **macOS**, data-at-rest protection relies on FileVault; the client **SHOULD** recommend FileVault enablement during onboarding.
 - The client **SHOULD** support an optional app lock (biometric or passcode) as an additional layer.
-- AI models stored locally do not require encryption (they contain no user data).
+- AI models stored locally do not require encryption (they contain no user data), but **MUST** be user-deletable via Settings.
+- See NFR-SEC-02 for normative requirements.
 
 ### 9.3 Data Deletion
 
@@ -414,7 +438,9 @@ Refer to Constitution TC-06 for hard limits.
 ### 10.2 Gmail OAuth Compliance
 
 - The client **MUST** complete Google's OAuth verification process before public release.
-- The client **MUST** request only the minimum scope: `https://mail.google.com/`.
+- The client **MUST** request only the scope `https://mail.google.com/`. This is the **only** OAuth scope Google provides for IMAP/SMTP access — Google deprecated narrower IMAP-specific scopes. Despite appearing broad, it is the minimum required scope for IMAP/SMTP OAuth.
+- The client **MUST** authenticate to Gmail IMAP and SMTP servers using the XOAUTH2 SASL mechanism (IMAP `AUTHENTICATE XOAUTH2`, SMTP `AUTH XOAUTH2`).
+- The client **MUST NOT** fall back to plaintext password authentication.
 - The client **MUST** comply with Google's API Services User Data Policy (Limited Use requirements).
 - The client **MUST** provide a privacy policy URL on the OAuth consent screen.
 - Refer to Constitution LG-02 for full requirements.
@@ -445,6 +471,10 @@ Refer to Constitution TC-06 for hard limits.
 | Incremental sync (10 emails) | < 5s | — | Foreground to updated list |
 | Send email | < 3s | 5s | After undo delay |
 
+> **Model assumption**: AI performance targets assume a quantized model in the 1–3B parameter range (Q4_K_M). Model selection is tracked in AI Features spec OQ-01.
+>
+> **Graceful degradation**: If AI inference exceeds Hard Limit thresholds on a device, the client **MUST** fall back to non-AI operation (no categorization, no summaries, keyword-only search) and inform the user. The client **MUST NOT** crash or block the UI due to AI resource constraints.
+
 ---
 
 ## 12. Alternatives Considered
@@ -474,3 +504,4 @@ See [Proposal — Section 4](../../proposal.md#4-alternatives-considered) for ar
 | Version | Date | Author | Change Summary |
 |---------|------|--------|---------------|
 | 1.0.0 | 2025-02-07 | Core Team | Extracted from monolithic spec v1.2.0. Contains cross-cutting architecture, data model, security, storage, legal, and performance content. |
+| 1.1.0 | 2025-02-07 | Core Team | Address 8 review findings: Gmail labels many-to-many model (EmailFolder join entity), IMAP UID/UIDVALIDITY fields, macOS encryption nuance, OAuth scope rationale + XOAUTH2, outbox/draft storage, AI degradation note, iPad scope fix, folder enum annotation. |

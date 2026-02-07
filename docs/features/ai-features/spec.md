@@ -137,6 +137,8 @@ sequenceDiagram
 - **Target**: < 500MB additional
 - **Hard Limit**: —
 
+> **Note**: AI performance targets assume a 1–3B parameter Q4-quantized model (see OQ-01). If AI inference exceeds Hard Limits or the model cannot load due to insufficient RAM, the client **MUST** fall back to non-AI operation per Foundation spec Section 11.
+
 ---
 
 ## 5. Data Model
