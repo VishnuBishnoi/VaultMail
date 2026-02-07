@@ -185,7 +185,202 @@ The AI engine **MUST** be abstracted behind a protocol. Swapping the underlying 
 
 ---
 
-## 6. Naming Conventions
+## 6. Spec Format Standard
+
+This section defines the mandatory document format, hierarchy, lifecycle, and template for all project specifications. Every feature or change **MUST** follow this framework.
+
+### SF-01: Document Hierarchy
+
+All project work flows through a fixed document chain. Each document type has a distinct purpose and audience.
+
+```mermaid
+graph LR
+    C["Constitution (Rules)"] --> P["Proposal (Why)"]
+    P --> S["Spec (What)"]
+    S --> PL["Plan (How)"]
+    PL --> T["Tasks (Do)"]
+    T --> V["Validation (Verify)"]
+
+    style C fill:#f9e0e0
+    style P fill:#e0e8f9
+    style S fill:#e0f5e0
+    style PL fill:#f5f0e0
+    style T fill:#f0e0f5
+    style V fill:#e0f5f0
+```
+
+| Document | Purpose | Scope | Owner |
+|----------|---------|-------|-------|
+| **Constitution** | Immutable rules and principles all work must conform to | Project-wide | Core Team |
+| **Proposal** | Justifies *why* a feature or project exists; evaluates alternatives | Platform-independent | Author → Core Team review |
+| **Spec** | Defines *what* to build — requirements, data models, behaviors | Platform-independent | Author → Core Team review |
+| **Plan** | Defines *how* to build it — architecture mapping, phases, dependencies | Platform-specific | Engineering Lead |
+| **Tasks** | Defines *what to do* — discrete deliverables with checklists | Platform-specific | Engineering Lead |
+| **Validation** | Defines *how to verify* — acceptance criteria, test plan, benchmarks | Platform-specific | QA Lead |
+
+### SF-02: Document Lifecycle
+
+Every document (except the Constitution) follows this lifecycle. No document **SHALL** skip a state.
+
+```mermaid
+stateDiagram-v2
+    [*] --> draft
+    draft --> review : Author marks ready
+    review --> draft : Reviewer requests changes
+    review --> approved : Reviewer approves
+    approved --> locked : Implementation begins
+    locked --> deprecated : Superseded by new version
+    deprecated --> [*]
+```
+
+| State | Meaning | Allowed Changes |
+|-------|---------|-----------------|
+| `draft` | Actively being written | Any |
+| `review` | Content-complete, under review | Feedback-driven edits only |
+| `approved` | Accepted by reviewers | Minor corrections only (typos, clarifications) |
+| `locked` | Implementation in progress or complete | None — requires a new versioned document to change |
+| `deprecated` | Superseded by a newer version | None |
+
+- Moving to `review` **REQUIRES** the author marking the document ready.
+- Moving to `approved` **REQUIRES** explicit reviewer approval.
+- Moving to `locked` **REQUIRES** explicit owner approval.
+- The Constitution uses a separate amendment process (see Section 1).
+
+### SF-03: Spec Document Structure
+
+Every spec **MUST** contain the following sections in this order. Sections marked **REQUIRED** must be present; sections marked **RECOMMENDED** should be present unless explicitly inapplicable.
+
+#### Front Matter (REQUIRED)
+
+YAML metadata block with: `title`, `version`, `status`, `created`, `updated`, `authors`, `reviewers`, `tags`, `depends-on`.
+
+#### Section Breakdown
+
+| # | Section | Requirement | Content |
+|---|---------|-------------|---------|
+| 1 | **Summary** | REQUIRED | 2-3 sentence plain-language overview |
+| 2 | **Goals and Non-Goals** | REQUIRED | Bulleted goals using RFC 2119 keywords; explicit non-goals to prevent scope creep |
+| 3 | **Functional Requirements (FRD)** | REQUIRED | Feature-by-feature behavioral specs. Each feature gets a subsection with: description, user-facing behavior, state diagrams (Mermaid), sequence diagrams (Mermaid), error handling |
+| 4 | **Non-Functional Requirements (NFR)** | REQUIRED | Performance targets, security requirements, accessibility requirements, scalability constraints. Each with measurable thresholds |
+| 5 | **Data Model** | REQUIRED | Entity definitions, relationships (Mermaid ERD), enums, constraints |
+| 6 | **Architecture Overview** | RECOMMENDED | High-level component diagram (Mermaid). How components interact |
+| 7 | **Platform-Specific Considerations** | RECOMMENDED | Per-platform deviations or additions to the common spec |
+| 8 | **Alternatives Considered** | REQUIRED | What was evaluated and why it was rejected |
+| 9 | **Open Questions** | REQUIRED | Numbered list with owner and target date. **MUST** be empty before status moves to `approved` |
+| 10 | **Revision History** | REQUIRED | Table: Version, Date, Author, Change Summary |
+
+#### Requirement ID Convention
+
+Every requirement **MUST** have a unique, stable ID for traceability:
+
+| Prefix | Meaning | Example |
+|--------|---------|---------|
+| `FR-` | Functional Requirement | `FR-SYNC-01: Initial full sync` |
+| `NFR-` | Non-Functional Requirement | `NFR-PERF-01: Cold start < 1.5s` |
+| `AC-` | Acceptance Criterion | `AC-F-05: IMAP client connectivity` |
+| `G-` | Goal | `G-01: Full email CRUD` |
+| `NG-` | Non-Goal | `NG-01: Non-Gmail providers` |
+| `OQ-` | Open Question | `OQ-01: Model selection` |
+
+### SF-04: Plan Document Structure
+
+Every platform-specific plan **MUST** contain:
+
+| # | Section | Content |
+|---|---------|---------|
+| 1 | **Scope** | Which spec sections are covered; platform deviations |
+| 2 | **Platform Context** | OS versions, frameworks, device targets, design guidelines |
+| 3 | **Architecture Mapping** | Spec architecture → concrete classes, files, modules (Mermaid class/flow diagrams) |
+| 4 | **Implementation Phases** | Ordered phases with task tables (ID, description, dependencies) |
+| 5 | **UI/UX Implementation** | Screen-by-screen breakdown, navigation flow, component sharing strategy |
+| 6 | **Testing Strategy** | Test pyramid, test targets, device matrix |
+| 7 | **Dependencies** | Third-party libraries with license and integration method |
+| 8 | **Risks and Mitigations** | Platform-specific risks with likelihood, impact, mitigation |
+
+### SF-05: Validation Document Structure
+
+Every validation document **MUST** contain:
+
+| # | Section | Content |
+|---|---------|---------|
+| 1 | **Traceability Matrix** | Maps every spec requirement (FR/NFR) → acceptance criteria → test cases |
+| 2 | **Acceptance Criteria** | Given/When/Then format with RFC 2119 keywords and priority (Critical/High/Medium/Low) |
+| 3 | **Edge Cases** | Error scenarios, boundary conditions, concurrency issues |
+| 4 | **Performance Validation** | Metric, target, hard limit, measurement method, failure threshold |
+| 5 | **Device Test Matrix** | Device, OS, role |
+| 6 | **Sign-Off** | Reviewer, role, date, status |
+
+### SF-06: Spec Template
+
+The following template **MUST** be used when creating any new spec:
+
+````markdown
+---
+title: "[Feature Name] — Specification"
+version: "1.0.0"
+status: draft
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+authors: []
+reviewers: []
+tags: []
+depends-on: [docs/constitution.md]
+---
+
+# Specification: [Feature Name]
+
+> The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHALL NOT**,
+> **SHOULD**, **SHOULD NOT**, **RECOMMENDED**, **MAY**, and **OPTIONAL** in this
+> document are to be interpreted as described in RFC 2119.
+
+## 1. Summary
+<!-- 2-3 sentence overview -->
+
+## 2. Goals and Non-Goals
+### Goals
+- **G-XX**: [Goal statement using RFC 2119 keyword]
+
+### Non-Goals
+- **NG-XX**: [Explicit exclusion]
+
+## 3. Functional Requirements
+### FR-[AREA]-XX: [Requirement Name]
+- **Description**: [What the system must do]
+- **Behavior**: [User-facing behavior]
+- **Error Handling**: [What happens on failure]
+
+## 4. Non-Functional Requirements
+### NFR-[AREA]-XX: [Requirement Name]
+- **Metric**: [What is measured]
+- **Target**: [Desired value]
+- **Hard Limit**: [Failure threshold]
+
+## 5. Data Model
+<!-- Mermaid ERD and entity definitions -->
+
+## 6. Architecture Overview
+<!-- Mermaid component diagram -->
+
+## 7. Platform-Specific Considerations
+### iOS
+### macOS
+
+## 8. Alternatives Considered
+| Alternative | Pros | Cons | Rejected Because |
+|-------------|------|------|-----------------|
+
+## 9. Open Questions
+| # | Question | Owner | Target Date |
+|---|----------|-------|-------------|
+
+## 10. Revision History
+| Version | Date | Author | Change Summary |
+|---------|------|--------|---------------|
+````
+
+---
+
+## 7. Naming Conventions
 
 ### Code
 
@@ -214,7 +409,7 @@ The AI engine **MUST** be abstracted behind a protocol. Swapping the underlying 
 
 ---
 
-## 7. Glossary
+## 8. Glossary
 
 | Term | Definition |
 |------|-----------|
@@ -229,7 +424,7 @@ The AI engine **MUST** be abstracted behind a protocol. Swapping the underlying 
 
 ---
 
-## 8. Amendment Log
+## 9. Amendment Log
 
 | # | Date | Description | Approved By |
 |---|------|-------------|-------------|
