@@ -1,6 +1,6 @@
 ---
 title: "Privacy-First Email Client — Product Specification"
-version: "1.1.0"
+version: "1.2.0"
 status: draft
 created: 2025-02-07
 updated: 2025-02-07
@@ -333,6 +333,64 @@ stateDiagram-v2
 - Local drafts and queued sends are authoritative locally until confirmed by the server.
 - If a local action (mark read, delete) fails to sync, the client **MUST** retry up to 3 times with exponential backoff, then surface the error to the user.
 
+#### 5.2.4 Threading Algorithm
+
+The client **MUST** group emails into conversation threads locally using the following algorithm. This is the canonical threading logic — it does not rely on any provider-specific thread IDs.
+
+**Step 1: Header Extraction**
+
+For each synced email, extract:
+- `Message-ID` — unique identifier for this email
+- `In-Reply-To` — the `Message-ID` of the direct parent message
+- `References` — ordered list of `Message-ID`s representing the full ancestry chain
+
+**Step 2: Reference Graph Construction**
+
+Build a directed graph where each `Message-ID` is a node. Edges are derived from:
+- `In-Reply-To` → link this message to its parent
+- `References` → link this message to all ancestors in the chain
+
+```mermaid
+graph TD
+    A["Message A (original)"] --> B["Message B (reply to A)"]
+    A --> C["Message C (reply to A)"]
+    B --> D["Message D (reply to B)"]
+    A --> D
+    B --> D
+```
+
+**Step 3: Thread Grouping by Reference Chain**
+
+All messages that share **any** `Message-ID` in their reference chains are grouped into the same thread. This is computed as connected components in the reference graph.
+
+**Step 4: Subject-Based Fallback**
+
+For messages with **no** `References` and **no** `In-Reply-To` headers (common in forwarded emails, some mailing lists, or broken clients):
+
+1. Normalize the subject: strip prefixes `Re:`, `Fwd:`, `RE:`, `FW:`, `re:`, `fwd:` (case-insensitive, applied recursively), then trim leading/trailing whitespace.
+2. Match against existing threads by exact normalized subject within the **same account**.
+3. Subject-only grouping **MUST** be restricted to messages within a **30-day window** of each other to prevent false merges across unrelated conversations with the same subject.
+
+**Step 5: Thread Metadata Computation**
+
+For each thread, compute:
+- `latestDate` — the most recent `dateSent` or `dateReceived` across all messages
+- `messageCount` — total number of messages
+- `unreadCount` — count of messages where `isRead == false`
+- `participants` — deduplicated list of all From addresses
+- `snippet` — first ~100 characters of the latest message body
+- `subject` — subject of the root (earliest) message
+
+**Gmail Mismatch Handling**
+
+Gmail's internal threading algorithm may produce different groupings than this RFC-based algorithm. The client's local threading is authoritative. Differences between Gmail's web UI thread view and this client's thread view are expected and acceptable. The client **MUST NOT** attempt to replicate Gmail's proprietary threading logic.
+
+**Limitations (V1)**
+
+- Thread splitting is **not** supported. Users cannot manually separate a thread into two.
+- Thread merging is **not** supported. Users cannot manually combine two threads.
+- These are deferred to V2.
+
 ### 5.3 Thread List Screen
 
 #### 5.3.1 Display Requirements
@@ -378,10 +436,71 @@ flowchart LR
 #### 5.4.2 Attachment Handling
 
 - The client **MUST** display attachment metadata (name, type, size) inline with the message.
-- The client **MUST** support downloading attachments to local storage.
-- The client **MUST** support previewing common attachment types (images, PDFs) inline.
+- The client **MUST** support downloading attachments to local storage on explicit user action (tap).
+- The client **MUST** support previewing common attachment types (images, PDFs) via system QuickLook (sandboxed).
 - The client **MUST** support sharing attachments via the system share sheet.
-- The client **MUST NOT** auto-download attachments over 5MB without user action.
+
+**Attachment Security**
+
+- The client **MUST NOT** auto-download any attachment regardless of size. All attachments require explicit user tap to download.
+- The client **MUST NOT** auto-open or auto-execute any attachment after download.
+- Attachment previews **MUST** use the system QuickLook framework, which provides sandboxed rendering.
+- The client **MUST** display a security warning before downloading executable or potentially dangerous file types:
+
+  | File Extensions | Warning |
+  |----------------|---------|
+  | `.exe`, `.bat`, `.cmd`, `.com`, `.msi` | "This file is a Windows executable." |
+  | `.app`, `.command`, `.sh`, `.pkg`, `.dmg` | "This file can run code on your Mac." |
+  | `.js`, `.vbs`, `.wsf`, `.scr` | "This file is a script that can run code." |
+  | `.zip`, `.rar`, `.7z`, `.tar.gz` | "This archive may contain executable files." |
+
+- The client **MUST NOT** execute attachments directly. Opening an attachment **MUST** delegate to the system handler (e.g., Finder, default app).
+- Downloaded attachment files **MUST** be stored within the app's sandbox directory, not in shared locations.
+
+#### 5.4.3 HTML Rendering Safety
+
+Email HTML is untrusted content. The client **MUST** sanitize and restrict HTML rendering to prevent privacy leaks, tracking, and code execution.
+
+**Remote Content Blocking**
+
+- The client **MUST** block all remote content (images, CSS, fonts, iframes) by default.
+- Blocked remote images **MUST** display a placeholder with an indication that images were blocked.
+- The client **MUST** provide a per-message "Load Remote Images" action.
+- The client **SHOULD** provide a per-sender "Always Load Remote Images" preference (stored locally).
+- When remote images are blocked, no network requests for those resources **SHALL** be made.
+
+**Tracking Pixel Detection**
+
+- The client **MUST** detect and strip likely tracking pixels before rendering, even when remote images are allowed:
+  - Images with dimensions 1x1 or 0x0 (in `width`/`height` attributes or inline CSS)
+  - Images with URLs matching known tracking domains (maintain a local blocklist)
+  - Images embedded in visually hidden elements (`display:none`, `visibility:hidden`, `opacity:0`)
+- Stripped tracking pixels **MUST NOT** generate any network request.
+- The client **SHOULD** display a count of blocked trackers per message (e.g., "3 trackers blocked").
+
+**HTML Sanitization**
+
+The following elements and attributes **MUST** be stripped or neutralized before rendering:
+
+| Removed | Reason |
+|---------|--------|
+| `<script>`, `<noscript>` | Code execution |
+| `<iframe>`, `<frame>`, `<frameset>` | External content embedding |
+| `<object>`, `<embed>`, `<applet>` | Plugin/code execution |
+| `<form>`, `<input>`, `<button>`, `<select>`, `<textarea>` | Phishing form submission |
+| `<meta http-equiv="refresh">` | Automatic redirect |
+| `<link rel="stylesheet">` (external) | Remote resource loading |
+| `@import` in CSS | Remote CSS loading |
+| Event handler attributes (`onclick`, `onerror`, `onload`, `onmouseover`, etc.) | Code execution |
+| `javascript:` URI scheme in `href`, `src`, `action` | Code execution |
+| `data:` URI scheme (except for inline images in `<img>` tags) | Content injection |
+
+**Rendering Constraints**
+
+- HTML **MUST** be rendered in a `WKWebView` with JavaScript **disabled** (`javaScriptEnabled = false`).
+- All hyperlinks **MUST** open in the system default browser, never navigated within the WKWebView.
+- The WKWebView **MUST** have no access to the app's cookies, local storage, or network session.
+- If sanitization fails or produces empty output, the client **MUST** fall back to rendering the plain text body.
 
 ### 5.5 Email Composer
 
@@ -400,16 +519,53 @@ flowchart LR
 #### 5.5.2 Send Behavior
 
 - The client **MUST** send email via SMTP.
-- The client **MUST** queue emails for sending if offline, and send when connectivity is restored.
+- The client **MUST** queue emails for sending if offline, and send when connectivity is restored. See Proposal Section 3.5 (Offline Send Queue) for the full queue lifecycle, retry policy, and error handling.
 - The client **MUST** move sent messages to the Sent folder via IMAP APPEND.
-- The client **MUST** display a send confirmation and support undo-send within a configurable window (default: 5 seconds).
 - The client **MUST** display clear error messages if sending fails.
+
+**Undo-Send Mechanism**
+
+Undo-send is a purely client-side delay. The email **MUST NOT** be transmitted to the SMTP server during the undo window.
+
+- The undo window is configurable: 0 (disabled), 5, 10, 15, or 30 seconds. Default: 5 seconds.
+- When the user taps Send:
+  1. The message transitions to `pendingSend` state in the local outbox.
+  2. A countdown toast/snackbar appears with an "Undo" button.
+  3. No SMTP transmission occurs during this window.
+
+**Undo-Send Edge Cases**
+
+| Scenario | Behavior |
+|----------|----------|
+| User taps Undo | Send cancelled. Message returns to composer for editing. |
+| Timer expires (app foregrounded) | SMTP send proceeds immediately. Message moves to Sent on success. |
+| App enters background during undo window | Timer **pauses**. Resumes when app returns to foreground. |
+| App terminated by OS during undo window | Message **MUST** be persisted as a draft (saved locally + synced to Drafts folder). It is **NOT** sent automatically on next launch. User must explicitly re-send. |
+| App killed by user during undo window | Same as OS termination: saved as draft, not auto-sent. |
+| Device loses network during undo window | Timer continues normally. On expiry, message enters the offline send queue (see Proposal 3.5). |
+| Undo window set to 0 (disabled) | SMTP send proceeds immediately on tap with no undo option. |
+
+**Persistence guarantee**: The message **MUST** be written to local storage (SwiftData) as `pendingSend` **before** the undo countdown begins. This ensures no data loss if the app is terminated at any point.
 
 #### 5.5.3 Smart Reply Integration
 
 - When composing a reply, the client **SHOULD** pre-populate up to 3 smart reply suggestions.
 - The user **MUST** be able to select a suggestion to insert it into the body, then edit freely.
 - Smart reply generation **MUST** happen asynchronously and **MUST NOT** block the composer UI.
+
+#### 5.5.4 Contacts Autocomplete Privacy
+
+The recipient autocomplete feature **MUST** operate entirely from locally synced data, with no external contact lookups.
+
+- Autocomplete data **MUST** be sourced exclusively from email headers (`From`, `To`, `CC`) of locally synced emails.
+- The client **MUST NOT** access the system Contacts framework (`CNContact`, `ABAddressBook`). No contact permissions are requested.
+- The client **MUST NOT** perform external contact directory lookups (LDAP, CardDAV, Google People API, etc.).
+- The contact cache **MUST** be stored locally in SwiftData, scoped per account.
+- Each contact entry stores: email address, display name (from email header), last seen date, frequency of appearance.
+- Autocomplete results **SHOULD** be ranked by frequency of correspondence (most frequent first).
+- When an account is removed, all associated contact cache entries **MUST** be deleted (cascade).
+- Contact data **MUST NOT** be shared, exported, or transmitted to any external service.
+- The unified inbox view **SHOULD** merge autocomplete suggestions across all accounts, deduplicating by email address.
 
 ### 5.6 AI Features
 
@@ -683,3 +839,4 @@ See [Proposal — Section 4](proposal.md#4-alternatives-considered) for architec
 |---------|------|--------|---------------|
 | 1.0.0 | 2025-02-07 | Core Team | Initial draft |
 | 1.1.0 | 2025-02-07 | Core Team | Added Sections 8 (Storage & Data Retention), 9 (Legal & Compliance). Resolved OQ-05. |
+| 1.2.0 | 2025-02-07 | Core Team | Added 5.2.4 (Threading Algorithm), 5.4.3 (HTML Rendering Safety), 5.5.4 (Contacts Autocomplete Privacy). Expanded 5.4.2 (Attachment Security). Rewrote 5.5.2 (Undo-Send edge cases). |
