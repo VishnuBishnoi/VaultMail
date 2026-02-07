@@ -34,7 +34,7 @@ This constitution defines the immutable constraints, principles, and rules that 
 
 - **Statement**: All AI features **MUST** run entirely on-device using local models.
 - **Rationale**: AI features that phone home defeat the privacy guarantee.
-- **Implications**: Models **MUST** be bundled or downloaded once and cached locally. Inference **MUST** happen on-device. No prompts, embeddings, or user content **SHALL** be sent to remote AI services.
+- **Implications**: Models **MUST** be downloaded and cached locally. Inference **MUST** happen on-device. No prompts, embeddings, or user content **SHALL** be sent to remote AI services. Model acquisition strategy is defined in LG-01.
 
 ### P-04: Offline Capability
 
@@ -187,11 +187,13 @@ This constitution defines the immutable constraints, principles, and rules that 
 
 | Data Type | Collected | Linked to User | Used for Tracking | Purpose |
 |-----------|-----------|----------------|-------------------|---------|
-| Email messages | Yes (locally) | No (never leaves device) | No | App Functionality |
-| Email address | Yes (locally) | No (never leaves device) | No | App Functionality |
-| Name | Yes (locally, from email headers) | No | No | App Functionality |
+| Email messages | No (stored locally only) | N/A | N/A | N/A |
+| Email address | No (stored locally only) | N/A | N/A | N/A |
+| Name | No (stored locally only) | N/A | N/A | N/A |
 | Usage data | No | N/A | N/A | N/A |
 | Diagnostics | No | N/A | N/A | N/A |
+
+- **Note**: "Collected" in App Store terms means data transmitted off the device to the developer or a third party. Since all data remains local or goes only to the user's email provider, it is **not collected**.
 
 - The privacy disclosure **MUST** be reviewed and updated with each release that changes data handling.
 - The client **MUST** include an in-app privacy policy accessible from Settings.
