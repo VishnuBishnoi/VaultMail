@@ -1,6 +1,6 @@
 ---
 title: "Foundation — Specification"
-version: "1.2.0"
+version: "1.3.0"
 status: draft
 created: 2025-02-07
 updated: 2025-02-07
@@ -254,6 +254,8 @@ erDiagram
 | `forums` | Mailing lists, group discussions |
 | `uncategorized` | Not yet processed by AI |
 
+> **Smart reply suggestions** are generated on-demand when the user views an email (see AI Features FR-AI-03). They are **not** cached in the data model — each invocation produces fresh suggestions based on the current conversation context. The `aiCategory` and `aiSummary` fields are the only persisted AI outputs.
+
 ### 5.3 Folder Type Enum
 
 The `folderType` values are provider-agnostic domain concepts. The IMAP mapping column below shows the **Gmail V1 provider mapping**. Future providers will define their own mappings for these standard folder types.
@@ -286,6 +288,18 @@ The `folderType` values are provider-agnostic domain concepts. The IMAP mapping 
 | `sent` | Successfully delivered via SMTP |
 
 > State machine transitions are defined in the Email Composer spec (FR-COMP-02) and Email Sync spec (FR-SYNC-07).
+
+### 5.6 Multi-Value Field Serialization
+
+Fields storing multiple values use the following formats:
+
+| Field | Entity | Format |
+|-------|--------|--------|
+| `toAddresses` | Email | JSON array of strings: `["alice@example.com", "bob@example.com"]` |
+| `ccAddresses` | Email | JSON array of strings (same as `toAddresses`) |
+| `bccAddresses` | Email | JSON array of strings (same as `toAddresses`) |
+| `references` | Email | Space-delimited Message-IDs per RFC 2822: `"<id1@host> <id2@host>"` |
+| `participants` | Thread | JSON array of objects: `[{"name": "Alice", "email": "alice@example.com"}]` |
 
 ---
 
@@ -506,7 +520,7 @@ See [Proposal — Section 4](../../proposal.md#4-alternatives-considered) for ar
 
 | # | Question | Owner | Target Date |
 |---|----------|-------|-------------|
-| OQ-03 | Should notification strategy be background-fetch-only or should we explore Apple Push Notification with a minimal relay? | Core Team | Plan phase |
+| ~~OQ-03~~ | ~~Should notification strategy be background-fetch-only or should we explore Apple Push Notification with a minimal relay?~~ **RESOLVED**: Background-fetch + IMAP IDLE only. A push notification relay would violate Constitution P-02 ("no push notification relay servers"). New email detection relies on IMAP IDLE (real-time when connected) and iOS background app refresh (periodic when backgrounded). | Core Team | Resolved |
 | ~~OQ-05~~ | ~~Maximum supported mailbox size for V1?~~ **RESOLVED**: 50K supported, 100K functional with degraded perf. See Constitution TC-06 and Section 4 (NFR-STOR-01). | Core Team | Resolved |
 
 ---
@@ -518,3 +532,4 @@ See [Proposal — Section 4](../../proposal.md#4-alternatives-considered) for ar
 | 1.0.0 | 2025-02-07 | Core Team | Extracted from monolithic spec v1.2.0. Contains cross-cutting architecture, data model, security, storage, legal, and performance content. |
 | 1.1.0 | 2025-02-07 | Core Team | Address 8 review findings: Gmail labels many-to-many model (EmailFolder join entity), IMAP UID/UIDVALIDITY fields, macOS encryption nuance, OAuth scope rationale + XOAUTH2, outbox/draft storage, AI degradation note, iPad scope fix, folder enum annotation. |
 | 1.2.0 | 2025-02-07 | Core Team | Review round 2: Fix cascade delete Trash logic (prevent unintended resurrection into Archive); add sendState enum table (SF-06 compliance). |
+| 1.3.0 | 2025-02-07 | Core Team | Review round 3: Resolve OQ-03 (background-fetch per P-02, all OQs now resolved); add Section 5.6 multi-value field serialization formats; add smart reply on-demand note. |
