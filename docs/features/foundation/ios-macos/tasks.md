@@ -2,9 +2,9 @@
 title: "Foundation — iOS/macOS Task Breakdown"
 platform: iOS, macOS
 plan-ref: docs/features/foundation/ios-macos/plan.md
-version: "1.0.0"
+version: "1.1.0"
 status: draft
-updated: 2025-02-07
+updated: 2026-02-07
 ---
 
 # Foundation — iOS/macOS Task Breakdown
@@ -15,27 +15,34 @@ updated: 2025-02-07
 
 ### IOS-F-01: Xcode Project Setup
 
-- **Status**: `todo`
+- **Status**: `done`
 - **Spec ref**: Foundation spec, Section 7 (Platform-Specific Considerations)
 - **Validation ref**: AC-F-01
-- **Description**: Create Xcode project with shared framework, iOS target, and macOS target. Configure build settings, deployment targets (iOS 17, macOS 14), and Swift 5.9. Set up folder structure per plan section 3.1.
+- **Commit**: `8287501`
+- **Description**: Create Xcode project with workspace + SPM package architecture. Configure deployment targets (iOS 17, macOS 14) and Swift 6.1. Set up folder structure with Domain/Models, Domain/Protocols, Data/Persistence, Shared layers.
 - **Deliverables**:
-  - [ ] Xcode project with three targets (Shared, iOS, macOS)
-  - [ ] Build settings configured for both platforms
-  - [ ] Project compiles and runs empty app on both targets
-  - [ ] `.gitignore` for Xcode artifacts
+  - [x] Workspace + SPM package (`PrivateMailPackage`) with iOS and macOS platform support
+  - [x] Build settings configured for both platforms (iOS 17.0+, macOS 14.0+)
+  - [x] Project compiles and launches empty app on both iOS Simulator and macOS
+  - [x] `.gitignore` for Xcode and SPM build artifacts
 
 ### IOS-F-02: SwiftData Model Definitions
 
-- **Status**: `todo`
+- **Status**: `done`
 - **Spec ref**: Foundation spec, Section 5 (Data Model)
 - **Validation ref**: AC-F-02
-- **Description**: Define all SwiftData `@Model` classes matching the spec ERD: Account, Folder, Email, Thread, Attachment, SearchIndex.
+- **Commit**: `8287501`
+- **Description**: Define all SwiftData `@Model` classes matching the spec ERD: Account, Folder, Email, Thread, EmailFolder, Attachment, SearchIndex. Define enums (AICategory, FolderType, SendState), repository protocols, and ModelContainerFactory.
 - **Deliverables**:
-  - [ ] `AccountEntity.swift` — Account model with all spec fields
-  - [ ] `FolderEntity.swift` — Folder model with folder type enum
-  - [ ] `EmailEntity.swift` — Email model with all spec fields
-  - [ ] `ThreadEntity.swift` — Thread model with computed properties
-  - [ ] `AttachmentEntity.swift` — Attachment model
-  - [ ] SwiftData `ModelContainer` configuration
-  - [ ] Unit tests for model relationships and constraints
+  - [x] `Account.swift` — Account model with all spec fields + syncWindowDays
+  - [x] `Folder.swift` — Folder model with folder type enum
+  - [x] `Email.swift` — Email model with all spec fields, @Attribute(.externalStorage) for body fields
+  - [x] `Thread.swift` — Thread model with accountId stored field
+  - [x] `EmailFolder.swift` — Join entity for Email↔Folder many-to-many with imapUID
+  - [x] `Attachment.swift` — Attachment model
+  - [x] `SearchIndex.swift` — Search index with embedding blob
+  - [x] `AICategory.swift`, `FolderType.swift`, `SendState.swift` — 3 enums per spec
+  - [x] 4 repository protocols (Account, Email, AI, Search)
+  - [x] `ModelContainerFactory.swift` — production + in-memory (testing) variants
+  - [x] `Constants.swift` — spec-derived constants
+  - [x] 27 unit tests across 4 suites (enums, relationships, CRUD, cascade deletes)
