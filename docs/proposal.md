@@ -1,7 +1,7 @@
 ---
 title: "Privacy-First Email Client"
 proposal-id: PROP-001
-version: "1.0.0"
+version: "1.1.0"
 status: draft
 author: Core Team
 created: 2025-02-07
@@ -108,6 +108,23 @@ graph TD
     style Custom stroke-dasharray: 5 5
 ```
 
+#### 3.3.1 Gmail IMAP Quirks and Mitigations
+
+Gmail's IMAP implementation deviates from standard IMAP in several well-documented ways. Since V1 targets Gmail exclusively, these quirks **MUST** be handled explicitly in the Gmail provider layer.
+
+| Gmail Quirk | Standard IMAP Behavior | Gmail Behavior | Mitigation |
+|------------|----------------------|----------------|------------|
+| **Labels as folders** | Folders are exclusive (an email lives in one folder) | Gmail labels are non-exclusive; an email can have multiple labels. Each label appears as an IMAP folder, so the same email shows up in multiple folders. | Deduplicate by Message-ID during sync. Track label membership as a multi-value field on the email entity. Display labels as tags, not folder membership. |
+| **All Mail folder** | No equivalent | `[Gmail]/All Mail` contains every non-Trash, non-Spam email. Archive = remove from INBOX but remains in All Mail. | Map "Archive" action to IMAP MOVE from INBOX to All Mail (remove \Inbox flag). Do not re-download emails already seen in another folder. |
+| **Threading** | No native thread model in IMAP | Gmail threads by subject + References/In-Reply-To headers internally, but IMAP only exposes per-message data. | Build thread model locally from `References` and `In-Reply-To` headers. Fall back to subject-based grouping when headers are absent. |
+| **Delete behavior** | STORE +FLAGS \Deleted, then EXPUNGE | Gmail moves to `[Gmail]/Trash` on delete. EXPUNGE in Trash permanently deletes. | Map "Delete" to MOVE to `[Gmail]/Trash`. Map "Permanent Delete" to STORE +FLAGS \Deleted + EXPUNGE only when in Trash. Warn user before permanent deletion. |
+| **Rate limits** | No standard rate limit | Gmail IMAP enforces per-user bandwidth and connection limits (~2.5GB/day download, ~500MB/day upload, max 15 concurrent connections). | Implement connection pooling (max 5 concurrent IMAP connections per account). Batch fetches within bandwidth limits. Implement exponential backoff on rate-limit errors (IMAP BYE response). Track bandwidth usage locally. |
+| **IDLE limits** | RFC 2177: IDLE until server terminates | Gmail drops IDLE connections after ~29 minutes of inactivity. | Implement IDLE re-establishment with a 25-minute refresh timer. |
+| **Search** | IMAP SEARCH command (keyword-based) | Gmail supports server-side SEARCH but it's limited vs. Gmail's web search. `X-GM-RAW` extension provides Gmail-style search, but is proprietary. | Do not rely on server-side search. All search is local (semantic + exact match via local index). IMAP SEARCH is only used for sync, not user-facing search. |
+| **Special-use folders** | RFC 6154 LIST extension | Gmail uses `[Gmail]/` prefix for special folders (Sent Mail, Drafts, Trash, Spam, Starred, All Mail, Important). | Detect Gmail special folders by `LIST` attributes (`\Sent`, `\Trash`, `\Drafts`, etc.) and fall back to `[Gmail]/` prefix pattern matching. Map to internal folder types. |
+
+These quirks are encapsulated within the Gmail provider implementation. The `MailProvider` protocol exposes a clean abstraction (folders, threads, labels, actions) that hides provider-specific behavior from the domain and presentation layers.
+
 ### 3.4 AI Strategy
 
 All AI features use quantized GGUF models running via llama.cpp. Models are downloaded once and cached locally. No inference requests leave the device.
@@ -119,7 +136,79 @@ All AI features use quantized GGUF models running via llama.cpp. Models are down
 | Summarization | Small generative model (~1-3B params) | P0 |
 | Semantic Search | Embedding model for vector similarity | P0 |
 
-### 3.5 Platform Strategy
+#### 3.4.1 Model Download Sources and Policy
+
+The "zero third-party server" principle (Constitution P-02) applies to servers that process or store user data. Model downloads are an exception: they transfer static, non-user data (model weight files) in a one-time operation. This is analogous to downloading app assets and does not violate the privacy guarantee because no user data is transmitted.
+
+**Allowed model sources** (in priority order):
+
+| Source | Description | Privacy Impact |
+|--------|-------------|---------------|
+| **Hugging Face Hub** | Direct HTTPS download of GGUF files from public model repositories (e.g., `huggingface.co/TheBloke/`). | None — no user data sent. Only an HTTPS GET request for a static file. No authentication required for public models. |
+| **Local file import** | User-provided GGUF file from local storage (Files app, AirDrop, USB transfer on Mac). | None — completely offline. |
+| **Project-hosted CDN** | If we host models on our own CDN in the future. | None — only model weights transferred. No user data. No tracking. CDN logs **MUST NOT** be used for user identification. |
+
+**Prohibited sources**:
+- Any source that requires transmitting user data (email content, account info, device identifiers) to initiate or authorize the download.
+- Any source that bundles telemetry or analytics with the model download.
+
+**Model download behavior**:
+- The app **MUST** display the model source URL, file size, and license before initiating download.
+- Downloads **MUST** use HTTPS.
+- Downloads **MUST** be resumable (support HTTP Range requests).
+- Downloaded models **MUST** be integrity-verified (SHA-256 checksum).
+- The app **MUST** function without AI features if the user declines or delays the download.
+
+### 3.5 Offline Send Queue
+
+Constitution P-04 requires offline capability, including queuing messages for sending when connectivity resumes. The offline send queue is a critical path that requires explicit behavior definition.
+
+#### Queue Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Queued : User taps Send (offline)
+    Queued --> Sending : Connectivity restored
+    Sending --> Sent : SMTP success
+    Sending --> RetryWait : SMTP failure
+    RetryWait --> Sending : Retry timer expires
+    RetryWait --> Failed : Max retries exceeded
+    Failed --> Queued : User taps Retry
+    Failed --> Discarded : User taps Discard
+    Sent --> [*]
+    Discarded --> [*]
+```
+
+#### Retry Policy
+
+| Parameter | Value |
+|-----------|-------|
+| Max retries | 5 |
+| Backoff strategy | Exponential: 30s, 2m, 8m, 30m, 2h |
+| Max queue age | 72 hours (then auto-transition to Failed) |
+| Retry trigger | Network connectivity change OR retry timer expiry |
+
+#### User Visibility
+
+- Queued messages **MUST** appear in a "Outbox" section visible from the thread list.
+- Each queued message **MUST** display its status: `Queued`, `Sending`, `Retry (attempt N/5)`, or `Failed`.
+- The user **MUST** be able to edit a queued message before it is sent.
+- The user **MUST** be able to cancel/discard a queued message at any point before `Sent`.
+- When a message transitions to `Failed`, the client **MUST** display a notification with the failure reason and options to retry or discard.
+- When a message is successfully sent from the queue, the client **SHOULD** display a brief confirmation.
+
+#### Error Handling
+
+| Failure Type | Behavior |
+|-------------|----------|
+| Network timeout | Retry per policy |
+| SMTP authentication failure (token expired) | Attempt token refresh; if refresh fails, pause queue and prompt re-auth |
+| SMTP rejected (invalid recipient) | Transition immediately to `Failed` (no retry); show error to user |
+| SMTP server error (5xx) | Retry per policy |
+| SMTP temporary error (4xx) | Retry per policy |
+| Device storage full | Pause queue; warn user |
+
+### 3.6 Platform Strategy
 
 | Phase | Platform | Approach |
 |-------|----------|----------|
@@ -181,11 +270,55 @@ The spec and domain logic are designed platform-independently. Only the plan and
 | Gmail OAuth complexity for IMAP | Low | Medium | Well-documented flow; use ASWebAuthenticationSession |
 | SwiftData limitations for complex queries | Low | Medium | Fallback to raw SQLite if needed for search index |
 
-## 6. Decision
+## 6. Threat Model
+
+A privacy-focused email client must be explicit about its threat model — what it protects against, what it does not, and what residual risks exist.
+
+### 6.1 Scope
+
+This threat model covers the client application and locally stored data. It does **not** cover the security of the email provider (Gmail), the transport network beyond TLS, or the user's device OS security.
+
+### 6.2 Threat Matrix
+
+| # | Threat | Attack Vector | Severity | Mitigation | Residual Risk |
+|---|--------|--------------|----------|------------|---------------|
+| T-01 | **Physical device access (unlocked)** | Attacker obtains unlocked device | High | Optional app lock (biometric/passcode). SwiftData inherits iOS Data Protection (encrypted when locked). | If device is unlocked and app lock is disabled, email data is accessible. User choice to enable app lock. |
+| T-02 | **Physical device access (locked)** | Attacker obtains locked device | Medium | iOS Data Protection encrypts SwiftData at rest when device is locked. Keychain items set to `WhenUnlockedThisDeviceOnly` are inaccessible. | Protected by OS-level encryption. No additional app-level mitigation needed. |
+| T-03 | **Device backup extraction** | Attacker accesses iTunes/Finder backup | Medium | Keychain items with `ThisDeviceOnly` are excluded from backups. SwiftData files are included in encrypted backups only. | Unencrypted backups expose email database. Mitigation: document that users should enable encrypted backups. |
+| T-04 | **Shared/managed device** | Another user or MDM profile accesses app data | Medium | App lock (biometric/passcode). Per-user iOS accounts isolate app data. | On shared devices without separate iOS accounts, app lock is the only barrier. MDM profiles may have device-level access. |
+| T-05 | **Network interception (MITM)** | Attacker intercepts IMAP/SMTP traffic | High | All connections use TLS. Certificate validation is mandatory. | Compromised CAs or TLS implementation bugs. Certificate pinning **MAY** be added as an enhancement. |
+| T-06 | **OAuth token theft** | Malware or jailbreak extracts Keychain | High | Keychain with hardware-backed protection (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`). Tokens scoped to minimum permissions. | Jailbroken devices weaken Keychain guarantees. Not mitigable at the app level. |
+| T-07 | **Local database tampering** | Attacker modifies SwiftData store | Low | SwiftData inherits file-system permissions. App sandbox prevents cross-app access. | Jailbroken device or physical access with forensic tools. Not mitigable at the app level. |
+| T-08 | **AI model poisoning** | Malicious GGUF file injected as model | Medium | Integrity verification via SHA-256 checksum against known-good hashes. Models downloaded only from pre-approved sources (Hugging Face, local import). | User-imported local files bypass checksum if the user explicitly overrides. |
+| T-09 | **Memory forensics during AI inference** | Email content in memory during LLM processing | Low | Swift/OS memory management. No persistent plaintext beyond process lifecycle. Model unloaded after inference. | Sophisticated memory dump attacks on a running device. Not practically mitigable at the app level. |
+| T-10 | **Metadata leakage via model downloads** | IP address exposed to Hugging Face during download | Low | Standard HTTPS download. No user data or device identifiers sent. | IP address is visible to the model host. Users concerned about this can use VPN or local file import. |
+
+### 6.3 Out of Scope
+
+The following threats are explicitly **not** addressed by the client:
+
+- **Email provider compromise**: If Gmail itself is compromised, all server-side data is at risk. The client mitigates this only by not adding additional server-side attack surface.
+- **OS-level compromise**: If the device OS is compromised (rootkit, jailbreak exploit), all bets are off. The client relies on the OS for sandboxing, encryption, and Keychain security.
+- **Social engineering**: Phishing emails displayed in the client are a user-level risk, not a client-level risk. The client does not implement phishing detection in V1.
+- **Side-channel attacks**: Timing attacks, power analysis, or electromagnetic emission attacks on AI inference are not addressed.
+
+### 6.4 Security Recommendations for Users
+
+The client **SHOULD** display a one-time security recommendations screen (in onboarding or settings) advising:
+
+- Enable device passcode and biometric authentication
+- Enable app lock for additional privacy
+- Use encrypted backups
+- Keep the device OS updated
+- Review connected accounts periodically
+
+---
+
+## 7. Decision
 
 _To be filled after review._
 
-## 7. Consequences
+## 8. Consequences
 
 If accepted:
 
