@@ -5,7 +5,8 @@ import Foundation
 ///
 /// Provides controllable behavior: arrays for data, call counters for
 /// verification, and error injection for testing failure paths.
-final class MockEmailRepository: EmailRepositoryProtocol, @unchecked Sendable {
+@MainActor
+final class MockEmailRepository: EmailRepositoryProtocol {
     // MARK: - Storage
 
     var folders: [Folder] = []

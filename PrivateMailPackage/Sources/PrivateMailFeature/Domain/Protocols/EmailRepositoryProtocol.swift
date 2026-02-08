@@ -2,11 +2,15 @@ import Foundation
 
 /// Repository protocol for email, thread, and folder operations.
 ///
+/// Isolated to `@MainActor` because SwiftData `@Model` types are not
+/// `Sendable` and must be accessed on the main actor.
+///
 /// Implementations live in the Data layer. The Domain layer depends only
 /// on this protocol (FR-FOUND-01: dependency inversion).
 ///
 /// Spec ref: Foundation spec Section 6
-public protocol EmailRepositoryProtocol: Sendable {
+@MainActor
+public protocol EmailRepositoryProtocol {
     // MARK: - Folders
 
     /// Fetch all folders for an account.

@@ -1,0 +1,494 @@
+import Foundation
+import SwiftData
+
+/// SwiftData implementation of EmailRepositoryProtocol.
+///
+/// All operations run on `@MainActor` because SwiftData's `ModelContext`
+/// requires main-actor isolation.
+///
+/// Spec ref: Foundation FR-FOUND-01, Thread List FR-TL-01..04
+@MainActor
+public final class EmailRepositoryImpl: EmailRepositoryProtocol {
+
+    private let modelContainer: ModelContainer
+
+    public init(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+    }
+
+    // MARK: - Folders
+
+    public func getFolders(accountId: String) async throws -> [Folder] {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<Folder>(
+            predicate: #Predicate { $0.account?.id == accountId },
+            sortBy: [SortDescriptor(\.name)]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    public func saveFolder(_ folder: Folder) async throws {
+        let context = ModelContext(modelContainer)
+        let folderId = folder.id
+        var descriptor = FetchDescriptor<Folder>(
+            predicate: #Predicate { $0.id == folderId }
+        )
+        descriptor.fetchLimit = 1
+
+        if let existing = try context.fetch(descriptor).first {
+            existing.name = folder.name
+            existing.imapPath = folder.imapPath
+            existing.unreadCount = folder.unreadCount
+            existing.totalCount = folder.totalCount
+            existing.folderType = folder.folderType
+            existing.uidValidity = folder.uidValidity
+            existing.lastSyncDate = folder.lastSyncDate
+        } else {
+            context.insert(folder)
+        }
+        try context.save()
+    }
+
+    public func deleteFolder(id: String) async throws {
+        let context = ModelContext(modelContainer)
+        var descriptor = FetchDescriptor<Folder>(
+            predicate: #Predicate { $0.id == id }
+        )
+        descriptor.fetchLimit = 1
+
+        guard let folder = try context.fetch(descriptor).first else {
+            throw ThreadListError.folderNotFound(id: id)
+        }
+        // Cascade handles EmailFolder join entries (FR-FOUND-03)
+        context.delete(folder)
+        try context.save()
+    }
+
+    // MARK: - Emails
+
+    public func getEmails(folderId: String) async throws -> [Email] {
+        let context = ModelContext(modelContainer)
+        // 2-step: EmailFolder -> Email
+        let efDescriptor = FetchDescriptor<EmailFolder>(
+            predicate: #Predicate<EmailFolder> { $0.folder?.id == folderId }
+        )
+        let emailFolders = try context.fetch(efDescriptor)
+        return emailFolders.compactMap { $0.email }
+    }
+
+    public func saveEmail(_ email: Email) async throws {
+        let context = ModelContext(modelContainer)
+        let emailId = email.id
+        var descriptor = FetchDescriptor<Email>(
+            predicate: #Predicate { $0.id == emailId }
+        )
+        descriptor.fetchLimit = 1
+
+        if let existing = try context.fetch(descriptor).first {
+            existing.fromAddress = email.fromAddress
+            existing.fromName = email.fromName
+            existing.toAddresses = email.toAddresses
+            existing.ccAddresses = email.ccAddresses
+            existing.bccAddresses = email.bccAddresses
+            existing.subject = email.subject
+            existing.bodyPlain = email.bodyPlain
+            existing.bodyHTML = email.bodyHTML
+            existing.snippet = email.snippet
+            existing.dateReceived = email.dateReceived
+            existing.dateSent = email.dateSent
+            existing.isRead = email.isRead
+            existing.isStarred = email.isStarred
+            existing.isDraft = email.isDraft
+            existing.isDeleted = email.isDeleted
+            existing.aiCategory = email.aiCategory
+            existing.aiSummary = email.aiSummary
+            existing.sizeBytes = email.sizeBytes
+            existing.sendState = email.sendState
+            existing.sendRetryCount = email.sendRetryCount
+            existing.sendQueuedDate = email.sendQueuedDate
+        } else {
+            context.insert(email)
+        }
+        try context.save()
+    }
+
+    public func deleteEmail(id: String) async throws {
+        let context = ModelContext(modelContainer)
+        var descriptor = FetchDescriptor<Email>(
+            predicate: #Predicate { $0.id == id }
+        )
+        descriptor.fetchLimit = 1
+
+        guard let email = try context.fetch(descriptor).first else { return }
+        // Cascade handles EmailFolder + Attachment cleanup (FR-FOUND-03)
+        context.delete(email)
+        try context.save()
+    }
+
+    // MARK: - Threads (Basic)
+
+    public func getThreads(accountId: String) async throws -> [PrivateMailFeature.Thread] {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+            predicate: #Predicate { $0.accountId == accountId },
+            sortBy: [SortDescriptor(\.latestDate, order: .reverse)]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    public func getThread(id: String) async throws -> PrivateMailFeature.Thread? {
+        let context = ModelContext(modelContainer)
+        var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+            predicate: #Predicate { $0.id == id }
+        )
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+
+    public func saveThread(_ thread: PrivateMailFeature.Thread) async throws {
+        let context = ModelContext(modelContainer)
+        let threadId = thread.id
+        var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+            predicate: #Predicate { $0.id == threadId }
+        )
+        descriptor.fetchLimit = 1
+
+        if let existing = try context.fetch(descriptor).first {
+            existing.subject = thread.subject
+            existing.latestDate = thread.latestDate
+            existing.messageCount = thread.messageCount
+            existing.unreadCount = thread.unreadCount
+            existing.isStarred = thread.isStarred
+            existing.aiCategory = thread.aiCategory
+            existing.aiSummary = thread.aiSummary
+            existing.snippet = thread.snippet
+            existing.participants = thread.participants
+        } else {
+            context.insert(thread)
+        }
+        try context.save()
+    }
+
+    // MARK: - Thread List Queries (FR-TL-01, FR-TL-02)
+
+    public func getThreads(
+        folderId: String,
+        category: String?,
+        cursor: Date?,
+        limit: Int
+    ) async throws -> [PrivateMailFeature.Thread] {
+        let context = ModelContext(modelContainer)
+
+        // Step 1: Fetch EmailFolder entries for the given folderId
+        let efDescriptor = FetchDescriptor<EmailFolder>(
+            predicate: #Predicate<EmailFolder> { $0.folder?.id == folderId }
+        )
+        let emailFolders = try context.fetch(efDescriptor)
+
+        // Step 2: Collect unique threadIds via the Email relationship
+        var threadIds = Set<String>()
+        for ef in emailFolders {
+            if let threadId = ef.email?.threadId {
+                threadIds.insert(threadId)
+            }
+        }
+
+        guard !threadIds.isEmpty else { return [] }
+
+        // Step 3: Fetch all threads and filter in memory
+        // (SwiftData #Predicate doesn't support Set.contains())
+        let allThreadsDescriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+            sortBy: [SortDescriptor(\.latestDate, order: .reverse)]
+        )
+        let allThreads = try context.fetch(allThreadsDescriptor)
+
+        let filtered = allThreads.filter { thread in
+            // Must be in the folder's thread set
+            guard threadIds.contains(thread.id) else { return false }
+
+            // Category filter
+            if let category, thread.aiCategory != category {
+                return false
+            }
+
+            // Cursor-based pagination: only threads older than cursor
+            if let cursor, let latestDate = thread.latestDate {
+                if latestDate >= cursor { return false }
+            } else if let cursor, thread.latestDate == nil {
+                // Threads with nil latestDate are treated as older than any cursor
+                _ = cursor
+            }
+
+            return true
+        }
+
+        return Array(filtered.prefix(limit))
+    }
+
+    public func getThreadsUnified(
+        category: String?,
+        cursor: Date?,
+        limit: Int
+    ) async throws -> [PrivateMailFeature.Thread] {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+            sortBy: [SortDescriptor(\.latestDate, order: .reverse)]
+        )
+        var threads = try context.fetch(descriptor)
+
+        // Apply category filter
+        if let category {
+            threads = threads.filter { $0.aiCategory == category }
+        }
+
+        // Apply cursor-based pagination
+        if let cursor {
+            threads = threads.filter { thread in
+                guard let latestDate = thread.latestDate else { return true }
+                return latestDate < cursor
+            }
+        }
+
+        return Array(threads.prefix(limit))
+    }
+
+    public func getOutboxEmails(accountId: String?) async throws -> [Email] {
+        let context = ModelContext(modelContainer)
+        let queuedState = SendState.queued.rawValue
+        let sendingState = SendState.sending.rawValue
+        let failedState = SendState.failed.rawValue
+
+        if let accountId {
+            let descriptor = FetchDescriptor<Email>(
+                predicate: #Predicate {
+                    $0.accountId == accountId && (
+                        $0.sendState == queuedState ||
+                        $0.sendState == sendingState ||
+                        $0.sendState == failedState
+                    )
+                },
+                sortBy: [SortDescriptor(\.sendQueuedDate, order: .reverse)]
+            )
+            return try context.fetch(descriptor)
+        } else {
+            let descriptor = FetchDescriptor<Email>(
+                predicate: #Predicate {
+                    $0.sendState == queuedState ||
+                    $0.sendState == sendingState ||
+                    $0.sendState == failedState
+                },
+                sortBy: [SortDescriptor(\.sendQueuedDate, order: .reverse)]
+            )
+            return try context.fetch(descriptor)
+        }
+    }
+
+    public func getUnreadCounts(folderId: String) async throws -> [String?: Int] {
+        let context = ModelContext(modelContainer)
+
+        // 3-step join: get threads for this folder
+        let efDescriptor = FetchDescriptor<EmailFolder>(
+            predicate: #Predicate<EmailFolder> { $0.folder?.id == folderId }
+        )
+        let emailFolders = try context.fetch(efDescriptor)
+
+        var threadIds = Set<String>()
+        for ef in emailFolders {
+            if let threadId = ef.email?.threadId {
+                threadIds.insert(threadId)
+            }
+        }
+
+        guard !threadIds.isEmpty else { return [:] }
+
+        let allThreadsDescriptor = FetchDescriptor<PrivateMailFeature.Thread>()
+        let allThreads = try context.fetch(allThreadsDescriptor)
+        let folderThreads = allThreads.filter { threadIds.contains($0.id) && $0.unreadCount > 0 }
+
+        // Aggregate unread counts per aiCategory
+        var counts: [String?: Int] = [:]
+        for thread in folderThreads {
+            let key = thread.aiCategory
+            counts[key, default: 0] += thread.unreadCount
+        }
+        return counts
+    }
+
+    public func getUnreadCountsUnified() async throws -> [String?: Int] {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<PrivateMailFeature.Thread>()
+        let allThreads = try context.fetch(descriptor)
+
+        var counts: [String?: Int] = [:]
+        for thread in allThreads where thread.unreadCount > 0 {
+            let key = thread.aiCategory
+            counts[key, default: 0] += thread.unreadCount
+        }
+        return counts
+    }
+
+    // MARK: - Thread Actions (FR-TL-03)
+
+    public func archiveThread(id: String) async throws {
+        let context = ModelContext(modelContainer)
+        var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+            predicate: #Predicate { $0.id == id }
+        )
+        descriptor.fetchLimit = 1
+
+        guard let thread = try context.fetch(descriptor).first else {
+            throw ThreadListError.threadNotFound(id: id)
+        }
+        // V1: delete thread (real implementation would move to Archive folder)
+        context.delete(thread)
+        try context.save()
+    }
+
+    public func deleteThread(id: String) async throws {
+        let context = ModelContext(modelContainer)
+        var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+            predicate: #Predicate { $0.id == id }
+        )
+        descriptor.fetchLimit = 1
+
+        guard let thread = try context.fetch(descriptor).first else {
+            throw ThreadListError.threadNotFound(id: id)
+        }
+        // V1: delete thread (real implementation would move to Trash)
+        context.delete(thread)
+        try context.save()
+    }
+
+    public func moveThread(id: String, toFolderId: String) async throws {
+        let context = ModelContext(modelContainer)
+
+        // Find the thread
+        var threadDescriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+            predicate: #Predicate { $0.id == id }
+        )
+        threadDescriptor.fetchLimit = 1
+        guard let thread = try context.fetch(threadDescriptor).first else {
+            throw ThreadListError.threadNotFound(id: id)
+        }
+
+        // Find the destination folder
+        var folderDescriptor = FetchDescriptor<Folder>(
+            predicate: #Predicate { $0.id == toFolderId }
+        )
+        folderDescriptor.fetchLimit = 1
+        guard let destinationFolder = try context.fetch(folderDescriptor).first else {
+            throw ThreadListError.folderNotFound(id: toFolderId)
+        }
+
+        // Update EmailFolder entries for all emails in the thread
+        for email in thread.emails {
+            // Remove existing EmailFolder associations
+            for ef in email.emailFolders {
+                context.delete(ef)
+            }
+            // Create new association with destination folder
+            let newEF = EmailFolder(imapUID: 0)
+            newEF.email = email
+            newEF.folder = destinationFolder
+            context.insert(newEF)
+        }
+
+        try context.save()
+    }
+
+    public func toggleReadStatus(threadId: String) async throws {
+        let context = ModelContext(modelContainer)
+        var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+            predicate: #Predicate { $0.id == threadId }
+        )
+        descriptor.fetchLimit = 1
+
+        guard let thread = try context.fetch(descriptor).first else {
+            throw ThreadListError.threadNotFound(id: threadId)
+        }
+
+        // Flip: if unread (> 0) set to 0, else set to 1
+        thread.unreadCount = thread.unreadCount > 0 ? 0 : 1
+        try context.save()
+    }
+
+    public func toggleStarStatus(threadId: String) async throws {
+        let context = ModelContext(modelContainer)
+        var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+            predicate: #Predicate { $0.id == threadId }
+        )
+        descriptor.fetchLimit = 1
+
+        guard let thread = try context.fetch(descriptor).first else {
+            throw ThreadListError.threadNotFound(id: threadId)
+        }
+
+        thread.isStarred = !thread.isStarred
+        try context.save()
+    }
+
+    // MARK: - Batch Thread Actions (FR-TL-03)
+
+    public func archiveThreads(ids: [String]) async throws {
+        for id in ids {
+            try await archiveThread(id: id)
+        }
+    }
+
+    public func deleteThreads(ids: [String]) async throws {
+        for id in ids {
+            try await deleteThread(id: id)
+        }
+    }
+
+    public func markThreadsRead(ids: [String]) async throws {
+        let context = ModelContext(modelContainer)
+        for id in ids {
+            var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+                predicate: #Predicate { $0.id == id }
+            )
+            descriptor.fetchLimit = 1
+            guard let thread = try context.fetch(descriptor).first else {
+                throw ThreadListError.threadNotFound(id: id)
+            }
+            thread.unreadCount = 0
+        }
+        try context.save()
+    }
+
+    public func markThreadsUnread(ids: [String]) async throws {
+        let context = ModelContext(modelContainer)
+        for id in ids {
+            var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+                predicate: #Predicate { $0.id == id }
+            )
+            descriptor.fetchLimit = 1
+            guard let thread = try context.fetch(descriptor).first else {
+                throw ThreadListError.threadNotFound(id: id)
+            }
+            thread.unreadCount = 1
+        }
+        try context.save()
+    }
+
+    public func starThreads(ids: [String]) async throws {
+        let context = ModelContext(modelContainer)
+        for id in ids {
+            var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+                predicate: #Predicate { $0.id == id }
+            )
+            descriptor.fetchLimit = 1
+            guard let thread = try context.fetch(descriptor).first else {
+                throw ThreadListError.threadNotFound(id: id)
+            }
+            thread.isStarred = true
+        }
+        try context.save()
+    }
+
+    public func moveThreads(ids: [String], toFolderId: String) async throws {
+        for id in ids {
+            try await moveThread(id: id, toFolderId: toFolderId)
+        }
+    }
+}
