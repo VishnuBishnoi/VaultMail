@@ -8,6 +8,32 @@ import Foundation
 /// Spec ref: Email Sync spec FR-SYNC-01 (Folder discovery, Email sync)
 enum IMAPResponseParser {
 
+    // MARK: - Shared DateFormatters (allocated once, reused)
+
+    /// RFC 2822: "Mon, 1 Jan 2024 12:00:00 +0000"
+    private static let rfc2822Formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE, d MMM yyyy HH:mm:ss Z"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    /// Short: "1 Jan 2024 12:00:00 +0000" (no weekday)
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d MMM yyyy HH:mm:ss Z"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    /// IMAP internal: "01-Jan-2024 12:00:00 +0000"
+    private static let imapInternalDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "dd-MMM-yyyy HH:mm:ss Z"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
     // MARK: - LIST Response Parsing
 
     /// Parses a `* LIST` response line into an `IMAPFolderInfo`.
@@ -231,10 +257,78 @@ enum IMAPResponseParser {
         return parts
     }
 
-    // MARK: - Private: Extraction Helpers
+    // MARK: - Multi-UID BODYSTRUCTURE Parsing
+
+    /// Parses BODYSTRUCTURE from multiple FETCH response lines (batch fetch).
+    ///
+    /// Used by the 2-phase batched body fetch (Phase 1) to get all structures
+    /// in a single round trip instead of one per UID (N+1 fix).
+    ///
+    /// - Parameter responses: Raw IMAP response lines from
+    ///   `UID FETCH uid1,uid2,...,uidN (UID BODYSTRUCTURE)`
+    /// - Returns: Mapping of UID → body parts
+    static func parseMultiBodyStructures(from responses: [String]) -> [UInt32: [BodyPart]] {
+        var result: [UInt32: [BodyPart]] = [:]
+        for response in responses {
+            guard response.uppercased().contains("BODYSTRUCTURE") else { continue }
+            let uid = extractUID(from: response)
+            guard uid > 0 else { continue }
+            let parts = parseBodyStructure(from: response)
+            result[uid] = parts
+        }
+        return result
+    }
+
+    /// Extracts body part content from a FETCH response, keyed by IMAP section ID.
+    ///
+    /// Unlike `extractBodyParts` (which keys by guessed content type), this keys
+    /// by the raw section number so callers with BODYSTRUCTURE metadata can
+    /// accurately determine content types themselves.
+    ///
+    /// Example: `"* 1 FETCH (UID 101 BODY[1] {5}\nHello)"` → `["1": "Hello"]`
+    static func extractBodyPartsBySection(from response: String) -> [String: String] {
+        var parts: [String: String] = [:]
+
+        let scanner = response as NSString
+        let searchRange = NSRange(location: 0, length: scanner.length)
+        let pattern = "BODY\\[([^\\]]+)\\]"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
+            return parts
+        }
+
+        let matches = regex.matches(in: response, options: [], range: searchRange)
+
+        for match in matches {
+            let sectionRange = match.range(at: 1)
+            let section = scanner.substring(with: sectionRange)
+
+            // Skip HEADER.FIELDS sections (those are headers, not body)
+            if section.contains("HEADER") { continue }
+
+            let afterBodyRange = NSRange(
+                location: match.range.upperBound,
+                length: scanner.length - match.range.upperBound
+            )
+            let afterBody = scanner.substring(with: afterBodyRange)
+
+            if afterBody.trimmingCharacters(in: .whitespaces).hasPrefix("NIL") {
+                continue
+            }
+
+            if let newlineIdx = afterBody.firstIndex(of: "\n") {
+                let content = String(afterBody[afterBody.index(after: newlineIdx)...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                parts[section] = content
+            }
+        }
+
+        return parts
+    }
+
+    // MARK: - Extraction Helpers
 
     /// Extracts UID from a FETCH response.
-    private static func extractUID(from response: String) -> UInt32 {
+    static func extractUID(from response: String) -> UInt32 {
         // Pattern: "UID 123" within the FETCH response
         if let range = response.range(of: "UID ", options: .caseInsensitive) {
             let afterUID = response[range.upperBound...]
@@ -245,7 +339,7 @@ enum IMAPResponseParser {
     }
 
     /// Extracts FLAGS from a FETCH response.
-    private static func extractFlags(from response: String) -> [String] {
+    static func extractFlags(from response: String) -> [String] {
         // Pattern: "FLAGS (\Seen \Flagged)" within the FETCH response
         guard let flagsRange = response.range(of: "FLAGS (", options: .caseInsensitive) else {
             return []
@@ -261,7 +355,7 @@ enum IMAPResponseParser {
     }
 
     /// Extracts RFC822.SIZE from a FETCH response.
-    private static func extractSize(from response: String) -> UInt32 {
+    static func extractSize(from response: String) -> UInt32 {
         if let range = response.range(of: "RFC822.SIZE ", options: .caseInsensitive) {
             let afterSize = response[range.upperBound...]
             let numStr = afterSize.prefix(while: { $0.isNumber })
@@ -655,21 +749,8 @@ enum IMAPResponseParser {
         guard let raw, !raw.isEmpty else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
 
-        let formatters: [DateFormatter] = {
-            let f1 = DateFormatter()
-            f1.dateFormat = "EEE, d MMM yyyy HH:mm:ss Z"
-            f1.locale = Locale(identifier: "en_US_POSIX")
-
-            let f2 = DateFormatter()
-            f2.dateFormat = "d MMM yyyy HH:mm:ss Z"
-            f2.locale = Locale(identifier: "en_US_POSIX")
-
-            let f3 = DateFormatter()
-            f3.dateFormat = "dd-MMM-yyyy HH:mm:ss Z"
-            f3.locale = Locale(identifier: "en_US_POSIX")
-
-            return [f1, f2, f3]
-        }()
+        // Uses static formatters — allocated once, not per call
+        let formatters = [rfc2822Formatter, shortDateFormatter, imapInternalDateFormatter]
 
         for formatter in formatters {
             if let date = formatter.date(from: trimmed) {

@@ -85,7 +85,12 @@ public enum GmailFolderMapper {
             return false
         }
 
-        // Gmail Important is a flag, not a real folder
+        // \Important → MUST NOT be synced as a folder; importance is a flag, not a mailbox (FR-SYNC-01)
+        if lowered.contains("\\important") {
+            return false
+        }
+
+        // Gmail Important is a flag, not a real folder (path fallback)
         if imapPath == "[Gmail]/Important" {
             return false
         }

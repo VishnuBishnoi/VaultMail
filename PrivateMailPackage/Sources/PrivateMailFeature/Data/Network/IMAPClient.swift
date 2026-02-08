@@ -10,6 +10,16 @@ import Foundation
 /// Validation ref: AC-F-05
 public actor IMAPClient: IMAPClientProtocol {
 
+    // MARK: - Shared DateFormatters (allocated once, reused)
+
+    /// IMAP SEARCH date format: "1-Jan-2024"
+    private static let searchDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d-MMM-yyyy"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
     // MARK: - Properties
 
     private let session: IMAPSession
@@ -107,7 +117,8 @@ public actor IMAPClient: IMAPClientProtocol {
     ///
     /// Returns UIDVALIDITY and EXISTS count from the server's SELECT response.
     public func selectFolder(_ imapPath: String) async throws -> (uidValidity: UInt32, messageCount: UInt32) {
-        let responses = try await session.execute("SELECT \"\(imapPath)\"")
+        let sanitizedPath = imapPath.imapQuoteSanitized
+        let responses = try await session.execute("SELECT \"\(sanitizedPath)\"")
 
         let uidValidity = IMAPResponseParser.parseUIDValidity(from: responses)
         let messageCount = IMAPResponseParser.parseExists(from: responses)
@@ -131,10 +142,7 @@ public actor IMAPClient: IMAPClientProtocol {
     /// Maps to IMAP `UID SEARCH SINCE <date>`.
     /// Per AC-F-05: MUST fetch email UIDs within a date range.
     public func searchUIDs(since date: Date) async throws -> [UInt32] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "d-MMM-yyyy"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        let dateStr = formatter.string(from: date)
+        let dateStr = Self.searchDateFormatter.string(from: date)
 
         let responses = try await session.execute("UID SEARCH SINCE \(dateStr)")
         return IMAPResponseParser.parseSearchResponse(from: responses)
@@ -158,27 +166,36 @@ public actor IMAPClient: IMAPClientProtocol {
         return IMAPResponseParser.parseHeaderResponses(responses)
     }
 
-    /// Fetches email bodies for specified UIDs.
+    /// Fetches email bodies for specified UIDs using 2-phase batched fetch.
     ///
-    /// Two-step process:
-    /// 1. Fetch BODYSTRUCTURE to determine text/plain and text/html part IDs
-    /// 2. Fetch those specific parts using BODY.PEEK[<partId>]
+    /// **Phase 1**: Batch all BODYSTRUCTURE fetches in one round trip.
+    /// **Phase 2**: Group UIDs by text part structure, batch body fetches per group.
+    ///
+    /// This eliminates the N+1 problem where the old implementation issued
+    /// 2-3 IMAP commands per UID (BODYSTRUCTURE + body parts). For 100 emails,
+    /// that was 200-300 round trips. Now it's 2-4 total regardless of count.
     ///
     /// Per AC-F-05: MUST fetch email bodies (plain text and HTML parts).
     /// Per FR-SYNC-08: MUST extract attachment metadata from BODYSTRUCTURE.
+    /// Per NFR-SYNC-02: Initial sync < 60s for 1,000 emails.
     public func fetchBodies(uids: [UInt32]) async throws -> [IMAPEmailBody] {
         guard !uids.isEmpty else { return [] }
 
-        var bodies: [IMAPEmailBody] = []
+        // ── Phase 1: Batch BODYSTRUCTURE (1 round trip instead of N) ──
+        let uidSet = uids.map(String.init).joined(separator: ",")
+        let bsResponses = try await session.execute(
+            "UID FETCH \(uidSet) (UID BODYSTRUCTURE)"
+        )
+        let structuresByUID = IMAPResponseParser.parseMultiBodyStructures(from: bsResponses)
+
+        // Categorize each UID's text parts and collect attachment info
+        var textInfoByUID: [UInt32: [(partId: String, mimeType: String)]] = [:]
+        var attachmentsByUID: [UInt32: [IMAPAttachmentInfo]] = [:]
 
         for uid in uids {
-            // Step 1: Fetch BODYSTRUCTURE
-            let bsCommand = "UID FETCH \(uid) (UID BODYSTRUCTURE)"
-            let bsResponses = try await session.execute(bsCommand)
-            let bsResponse = bsResponses.joined(separator: "\n")
+            let allParts = structuresByUID[uid] ?? []
 
-            let bodyParts = IMAPResponseParser.parseBodyStructure(from: bsResponse)
-            let attachments = bodyParts
+            attachmentsByUID[uid] = allParts
                 .filter { $0.isAttachment }
                 .map { part in
                     IMAPAttachmentInfo(
@@ -190,52 +207,74 @@ public actor IMAPClient: IMAPClientProtocol {
                     )
                 }
 
-            // Step 2: Find text parts to fetch
-            let textParts = bodyParts.filter { !$0.isAttachment }
-            var plainText: String?
-            var htmlText: String?
-
+            let textParts = allParts.filter { !$0.isAttachment }
             if textParts.isEmpty {
-                // Simple message — fetch BODY[TEXT]
-                let bodyCommand = "UID FETCH \(uid) (UID BODY.PEEK[TEXT])"
-                let bodyResponses = try await session.execute(bodyCommand)
-                let bodyResponse = bodyResponses.joined(separator: "\n")
-
-                // Extract the literal content
-                if let literalStart = bodyResponse.firstIndex(of: "\n") {
-                    plainText = String(bodyResponse[bodyResponse.index(after: literalStart)...])
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                }
+                // Simple message — will fetch BODY[TEXT]
+                textInfoByUID[uid] = [("TEXT", "text/plain")]
             } else {
-                // Fetch specific text parts
-                for part in textParts {
-                    let fetchCmd = "UID FETCH \(uid) (UID BODY.PEEK[\(part.partId)])"
-                    let fetchResponses = try await session.execute(fetchCmd)
-                    let fetchResponse = fetchResponses.joined(separator: "\n")
-
-                    // Extract literal content
-                    if let literalStart = fetchResponse.firstIndex(of: "\n") {
-                        let content = String(fetchResponse[fetchResponse.index(after: literalStart)...])
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-                        if part.mimeType.contains("html") {
-                            htmlText = content
-                        } else {
-                            plainText = content
-                        }
-                    }
-                }
+                textInfoByUID[uid] = textParts.map { ($0.partId, $0.mimeType) }
             }
-
-            bodies.append(IMAPEmailBody(
-                uid: uid,
-                plainText: plainText,
-                htmlText: htmlText,
-                attachments: attachments
-            ))
         }
 
-        return bodies
+        // Group UIDs that need the same set of part IDs → one fetch per group
+        // Key: sorted comma-joined part IDs, e.g. "1,2" or "TEXT"
+        var groups: [String: [UInt32]] = [:]
+        for uid in uids {
+            let key = (textInfoByUID[uid] ?? [])
+                .map { $0.partId }
+                .sorted()
+                .joined(separator: ",")
+            groups[key, default: []].append(uid)
+        }
+
+        // ── Phase 2: Batch body fetches per group (few round trips vs N) ──
+        var resultsByUID: [UInt32: (plain: String?, html: String?)] = [:]
+
+        for (groupKey, groupUIDs) in groups {
+            let groupSet = groupUIDs.map(String.init).joined(separator: ",")
+            let partIds = groupKey.split(separator: ",").map(String.init)
+            let peeks = partIds.map { "BODY.PEEK[\($0)]" }.joined(separator: " ")
+
+            let responses = try await session.execute(
+                "UID FETCH \(groupSet) (UID \(peeks))"
+            )
+
+            for response in responses {
+                guard response.contains("FETCH") else { continue }
+                let uid = IMAPResponseParser.extractUID(from: response)
+                guard uid > 0 else { continue }
+
+                let sectionContent = IMAPResponseParser.extractBodyPartsBySection(
+                    from: response
+                )
+
+                var plain: String?
+                var html: String?
+
+                // Map section content to plain/html using BODYSTRUCTURE metadata
+                for (partId, mimeType) in textInfoByUID[uid] ?? [] {
+                    guard let content = sectionContent[partId] else { continue }
+                    if mimeType.contains("html") {
+                        html = content
+                    } else {
+                        plain = content
+                    }
+                }
+
+                resultsByUID[uid] = (plain, html)
+            }
+        }
+
+        // Build final results preserving input UID order
+        return uids.map { uid in
+            let (plain, html) = resultsByUID[uid] ?? (nil, nil)
+            return IMAPEmailBody(
+                uid: uid,
+                plainText: plain,
+                htmlText: html,
+                attachments: attachmentsByUID[uid] ?? []
+            )
+        }
     }
 
     /// Fetches current flags for specified UIDs.
@@ -260,12 +299,12 @@ public actor IMAPClient: IMAPClientProtocol {
     /// - Unstar: remove \\Flagged
     public func storeFlags(uid: UInt32, add: [String], remove: [String]) async throws {
         if !add.isEmpty {
-            let flagStr = add.joined(separator: " ")
+            let flagStr = add.map { $0.imapCRLFStripped }.joined(separator: " ")
             _ = try await session.execute("UID STORE \(uid) +FLAGS (\(flagStr))")
         }
 
         if !remove.isEmpty {
-            let flagStr = remove.joined(separator: " ")
+            let flagStr = remove.map { $0.imapCRLFStripped }.joined(separator: " ")
             _ = try await session.execute("UID STORE \(uid) -FLAGS (\(flagStr))")
         }
     }
@@ -279,7 +318,8 @@ public actor IMAPClient: IMAPClientProtocol {
         guard !uids.isEmpty else { return }
 
         let uidSet = uids.map(String.init).joined(separator: ",")
-        _ = try await session.execute("UID COPY \(uidSet) \"\(destinationPath)\"")
+        let sanitizedPath = destinationPath.imapQuoteSanitized
+        _ = try await session.execute("UID COPY \(uidSet) \"\(sanitizedPath)\"")
     }
 
     /// Permanently removes messages from the currently selected folder.
@@ -289,10 +329,9 @@ public actor IMAPClient: IMAPClientProtocol {
     public func expungeMessages(uids: [UInt32]) async throws {
         guard !uids.isEmpty else { return }
 
-        // Mark messages as deleted
-        for uid in uids {
-            _ = try await session.execute("UID STORE \(uid) +FLAGS (\\Deleted)")
-        }
+        // Batch-mark all messages as deleted in one round trip (not N)
+        let uidSet = uids.map(String.init).joined(separator: ",")
+        _ = try await session.execute("UID STORE \(uidSet) +FLAGS (\\Deleted)")
 
         // Expunge
         _ = try await session.execute("EXPUNGE")

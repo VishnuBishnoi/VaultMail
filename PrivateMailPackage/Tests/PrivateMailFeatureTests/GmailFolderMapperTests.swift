@@ -200,6 +200,27 @@ struct GmailFolderMapperTests {
         #expect(!shouldSync)
     }
 
+    @Test("\\Important attribute MUST NOT be synced regardless of path (FR-SYNC-01)")
+    func importantAttributeNotSynced() {
+        // FR-SYNC-01: \Important → MUST NOT be synced as a folder;
+        // importance is a flag, not a mailbox.
+        // This must work by attribute, not just by path.
+        let shouldSync = GmailFolderMapper.shouldSync(
+            imapPath: "SomeOtherFolder",
+            attributes: ["\\Important"]
+        )
+        #expect(!shouldSync)
+    }
+
+    @Test("\\Important attribute check is case-insensitive")
+    func importantCaseInsensitive() {
+        let shouldSync = GmailFolderMapper.shouldSync(
+            imapPath: "AnyFolder",
+            attributes: ["\\IMPORTANT"]
+        )
+        #expect(!shouldSync)
+    }
+
     @Test("Folder with \\Noselect MUST NOT be synced")
     func noselectNotSynced() {
         let shouldSync = GmailFolderMapper.shouldSync(

@@ -228,9 +228,15 @@ actor IMAPSession {
         return tag
     }
 
-    /// Reads one line during IDLE (blocks until server sends something).
+    /// Reads one line during IDLE.
+    ///
+    /// Uses a longer read timeout (IDLE refresh interval + 60s buffer) because
+    /// the server may not send data for up to 25 minutes during normal IDLE.
+    /// A 30s timeout would false-positive during valid IDLE waits.
     func readIDLENotification() async throws -> String {
-        return try await readLine()
+        return try await readLine(
+            timeout: AppConstants.imapIdleRefreshInterval + 60
+        )
     }
 
     /// Stops IDLE mode by sending DONE.
@@ -273,8 +279,10 @@ actor IMAPSession {
         tagCounter += 1
         let tag = makeTag()
 
-        let flagStr = flags.isEmpty ? "" : " (\(flags.joined(separator: " ")))"
-        let cmd = "\(tag) APPEND \"\(folder)\"\(flagStr) {\(data.count)}"
+        let sanitizedFolder = folder.imapQuoteSanitized
+        let sanitizedFlags = flags.map { $0.imapCRLFStripped }
+        let flagStr = sanitizedFlags.isEmpty ? "" : " (\(sanitizedFlags.joined(separator: " ")))"
+        let cmd = "\(tag) APPEND \"\(sanitizedFolder)\"\(flagStr) {\(data.count)}"
         try await sendRaw(cmd)
 
         // Wait for continuation response (+)
@@ -326,12 +334,16 @@ actor IMAPSession {
 
     /// Reads a complete IMAP response line from the connection.
     /// Handles IMAP literal syntax `{NNN}` for multi-line data.
-    private func readLine() async throws -> String {
+    ///
+    /// - Parameter timeout: Optional read timeout override. Defaults to
+    ///   `self.timeout` (30s) for normal operations. IDLE reads pass a
+    ///   longer timeout to avoid false positives during valid IDLE waits.
+    private func readLine(timeout readTimeout: TimeInterval? = nil) async throws -> String {
         while true {
             if let result = consumeLine() {
                 return result
             }
-            try await receiveMoreData()
+            try await receiveMoreData(timeout: readTimeout)
         }
     }
 
@@ -375,14 +387,36 @@ actor IMAPSession {
         return Int(sizeStr)
     }
 
-    private func receiveMoreData() async throws {
+    /// Receives data from the connection with a timeout guard.
+    ///
+    /// Per FR-SYNC-01: "Network timeout during fetch MUST trigger a retry"
+    /// — this requires a mechanism that *detects* the timeout. Without it
+    /// a stale connection would block indefinitely.
+    ///
+    /// Uses the same `AtomicFlag` + `asyncAfter` pattern as `connect()`
+    /// for consistency and proven correctness.
+    ///
+    /// - Parameter timeout: Read timeout override. Defaults to `self.timeout`
+    ///   (30s). IDLE reads pass a longer value via `readLine(timeout:)`.
+    private func receiveMoreData(timeout readTimeout: TimeInterval? = nil) async throws {
         guard let conn = connection, conn.state == .ready else {
             throw IMAPError.connectionFailed("Not connected")
         }
 
+        let effectiveTimeout = readTimeout ?? timeout
+        let flag = AtomicFlag()
+        let queue = connectionQueue
+
         let data: Data = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { cont in
+                // Read timeout guard (FR-SYNC-01, FR-SYNC-09)
+                queue.asyncAfter(deadline: .now() + effectiveTimeout) {
+                    guard flag.trySet() else { return }
+                    cont.resume(throwing: IMAPError.timeout)
+                }
+
                 conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, _, error in
+                    guard flag.trySet() else { return }
                     if let error {
                         cont.resume(throwing: IMAPError.connectionFailed(error.localizedDescription))
                     } else if let data, !data.isEmpty {
@@ -401,5 +435,49 @@ actor IMAPSession {
 
     private func makeTag() -> String {
         "A\(String(format: "%04d", tagCounter))"
+    }
+}
+
+// MARK: - IMAP Command Sanitization
+
+/// Internal extensions for safe IMAP command interpolation.
+///
+/// Prevents command injection by sanitizing strings before they are
+/// interpolated into IMAP commands sent over the wire.
+///
+/// Two levels:
+/// - `imapQuoteSanitized`: For strings inside IMAP quoted strings (folder paths).
+///   Escapes `\` and `"` per RFC 3501 §4.3, strips CR/LF.
+/// - `imapCRLFStripped`: For IMAP atoms (flags, keywords) where backslash is
+///   syntactically meaningful. Only strips CR/LF to prevent command injection.
+extension String {
+
+    /// Sanitizes for safe interpolation into an IMAP **quoted string**.
+    ///
+    /// Per RFC 3501 §4.3, quoted strings cannot contain bare CR or LF,
+    /// and `\` and `"` must be escaped as `\\` and `\"`.
+    ///
+    /// This prevents:
+    /// - **CRLF injection**: A `\r\n` in a folder name would terminate the
+    ///   current command and start a new one on the server.
+    /// - **Quote breakout**: A `"` in a folder name would close the quoted
+    ///   string and allow arbitrary command content after it.
+    var imapQuoteSanitized: String {
+        self
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    /// Strips CR and LF for safe interpolation into IMAP **atoms** (flags, etc.).
+    ///
+    /// Unlike `imapQuoteSanitized`, this does NOT escape backslashes because
+    /// IMAP flags (e.g., `\Seen`, `\Flagged`) use bare backslashes as part
+    /// of their syntax. Only CRLF is stripped to prevent command injection.
+    var imapCRLFStripped: String {
+        self
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
     }
 }

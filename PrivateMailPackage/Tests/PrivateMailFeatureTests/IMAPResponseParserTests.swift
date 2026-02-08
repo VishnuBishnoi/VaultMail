@@ -641,6 +641,104 @@ struct IMAPResponseParserTests {
         #expect(headers[0].bcc.isEmpty)
     }
 
+    // MARK: - Multi-UID BODYSTRUCTURE Parsing (N+1 fix)
+
+    @Test("Parses multiple UID BODYSTRUCTUREs in one batch (N+1 fix)")
+    func parseMultiBodyStructures() {
+        let responses = [
+            #"* 1 FETCH (UID 101 BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 100 5))"#,
+            #"* 2 FETCH (UID 102 BODYSTRUCTURE (("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 100 5)("TEXT" "HTML" ("CHARSET" "UTF-8") NIL NIL "QUOTED-PRINTABLE" 500 20) "ALTERNATIVE"))"#,
+            "TAG1 OK FETCH completed",
+        ]
+
+        let result = IMAPResponseParser.parseMultiBodyStructures(from: responses)
+
+        #expect(result.count == 2)
+        #expect(result[101]?.count == 1)
+        #expect(result[101]?[0].mimeType == "text/plain")
+        #expect(result[102]?.count == 2)
+
+        let plainPart = result[102]?.first { $0.mimeType == "text/plain" }
+        let htmlPart = result[102]?.first { $0.mimeType == "text/html" }
+        #expect(plainPart != nil)
+        #expect(htmlPart != nil)
+    }
+
+    @Test("parseMultiBodyStructures ignores non-BODYSTRUCTURE responses")
+    func parseMultiBodyStructuresIgnoresOther() {
+        let responses = [
+            "* 1 FETCH (UID 101 FLAGS (\\Seen))",
+            "TAG1 OK completed",
+        ]
+
+        let result = IMAPResponseParser.parseMultiBodyStructures(from: responses)
+        #expect(result.isEmpty)
+    }
+
+    @Test("parseMultiBodyStructures returns empty for empty input")
+    func parseMultiBodyStructuresEmpty() {
+        let result = IMAPResponseParser.parseMultiBodyStructures(from: [])
+        #expect(result.isEmpty)
+    }
+
+    @Test("parseMultiBodyStructures skips responses with UID 0")
+    func parseMultiBodyStructuresSkipsUID0() {
+        // A response without a valid UID value
+        let responses = [
+            #"* 1 FETCH (BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 100 5))"#,
+        ]
+
+        let result = IMAPResponseParser.parseMultiBodyStructures(from: responses)
+        #expect(result.isEmpty) // UID 0 is filtered out
+    }
+
+    // MARK: - Body Parts By Section (N+1 fix)
+
+    @Test("Extracts body content keyed by section number")
+    func extractBodyPartsBySection() {
+        let response = "* 1 FETCH (UID 101 BODY[1] {5}\nHello)"
+
+        let parts = IMAPResponseParser.extractBodyPartsBySection(from: response)
+
+        #expect(parts.count == 1)
+        #expect(parts["1"] != nil)
+        #expect(parts["1"]?.contains("Hello") == true)
+    }
+
+    @Test("extractBodyPartsBySection handles TEXT section")
+    func extractBodyPartsBySectionText() {
+        let response = "* 1 FETCH (UID 101 BODY[TEXT] {11}\nPlain text.)"
+
+        let parts = IMAPResponseParser.extractBodyPartsBySection(from: response)
+
+        #expect(parts["TEXT"] != nil)
+        #expect(parts["TEXT"]?.contains("Plain text") == true)
+    }
+
+    @Test("extractBodyPartsBySection skips HEADER sections")
+    func extractBodyPartsBySectionSkipsHeaders() {
+        let response = "* 1 FETCH (UID 101 BODY[HEADER.FIELDS (FROM)] {20}\nFrom: test@test.com)"
+
+        let parts = IMAPResponseParser.extractBodyPartsBySection(from: response)
+        #expect(parts.isEmpty) // HEADER sections should be skipped
+    }
+
+    @Test("extractBodyPartsBySection skips NIL content")
+    func extractBodyPartsBySectionSkipsNIL() {
+        let response = "* 1 FETCH (UID 101 BODY[1] NIL)"
+
+        let parts = IMAPResponseParser.extractBodyPartsBySection(from: response)
+        #expect(parts.isEmpty)
+    }
+
+    @Test("extractBodyPartsBySection returns empty for non-BODY response")
+    func extractBodyPartsBySectionNonBody() {
+        let response = "* 1 FETCH (UID 101 FLAGS (\\Seen))"
+
+        let parts = IMAPResponseParser.extractBodyPartsBySection(from: response)
+        #expect(parts.isEmpty)
+    }
+
     // MARK: - Edge Cases
 
     @Test("Handles empty response arrays gracefully")

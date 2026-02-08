@@ -20,8 +20,8 @@ public enum AppConstants {
     /// Per-account storage warning threshold in GB (NFR-STOR-01)
     public static let accountStorageWarningGB: Double = 2.0
 
-    /// Offline send queue max age in hours (Section 8.1)
-    public static let sendQueueMaxAgeHours = 72
+    /// Offline send queue max age in hours (FR-SYNC-07 step 5: 24 hours)
+    public static let sendQueueMaxAgeHours = 24
 
     /// Maximum send retry attempts before marking as failed
     public static let maxSendRetryCount = 3
