@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 /// Main settings screen with all V1 sections.
 ///
@@ -11,6 +12,7 @@ import SwiftUI
 /// Spec ref: FR-SET-01, FR-SET-02, FR-SET-03, FR-SET-04, FR-SET-05
 public struct SettingsView: View {
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
     let manageAccounts: ManageAccountsUseCaseProtocol
@@ -19,7 +21,9 @@ public struct SettingsView: View {
     @State private var isAddingAccount = false
     @State private var showClearCacheConfirmation = false
     @State private var showWipeConfirmation = false
+    @State private var estimatedCacheSize: String = "…"
     @State private var errorMessage: String?
+    @State private var notificationPermissionDenied = false
 
     public init(manageAccounts: ManageAccountsUseCaseProtocol) {
         self.manageAccounts = manageAccounts
@@ -159,7 +163,29 @@ public struct SettingsView: View {
                     }
                 }
             }
+
+            // Denied-state UX: show note + link to system Settings when OS permission denied (FR-SET-01)
+            if notificationPermissionDenied {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Notifications are disabled in system Settings.", systemImage: "bell.slash")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                    #if os(iOS)
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                    .font(.callout)
+                    #else
+                    Text("Enable notifications in System Settings → Notifications.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    #endif
+                }
+            }
         }
+        .task { await checkNotificationPermission() }
     }
 
     @ViewBuilder
@@ -181,13 +207,14 @@ public struct SettingsView: View {
             }
 
             Button("Clear Cache") {
+                Task { await estimateCacheSize() }
                 showClearCacheConfirmation = true
             }
             .alert("Clear Cache", isPresented: $showClearCacheConfirmation) {
-                Button("Clear", role: .destructive) { clearCache() }
+                Button("Clear (\(estimatedCacheSize))", role: .destructive) { clearCache() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This will remove cached attachments and data. Emails and accounts will not be affected.")
+                Text("This will remove cached attachments and regenerable data (\(estimatedCacheSize)). Emails and accounts will not be affected.")
             }
 
             Button("Wipe All Data", role: .destructive) {
@@ -234,10 +261,33 @@ public struct SettingsView: View {
         }
     }
 
+    /// Estimate cache size using StorageCalculator to show the user how much will be freed.
+    /// V1: Returns attachment + search index estimates. Real implementation will use
+    /// actual disk size when cache layers exist.
+    private func estimateCacheSize() async {
+        do {
+            let container = modelContext.container
+            let calculator = StorageCalculator(modelContainer: container)
+            let info = try await calculator.calculateStorage()
+            let cacheBytes = info.accounts.reduce(into: Int64(0)) {
+                $0 += $1.attachmentCacheSizeBytes + $1.searchIndexSizeBytes
+            }
+            estimatedCacheSize = cacheBytes.formattedBytes
+        } catch {
+            estimatedCacheSize = "unknown"
+        }
+    }
+
+    /// PARTIAL SCOPE — V1 STUB: Clears cached data.
+    /// Blocked on attachment download cache (IOS-F-07) and search index (IOS-F-08).
+    /// Real implementation MUST:
+    /// - Delete downloaded attachment files from disk
+    /// - Clear search embeddings / AI category cache
+    /// - NOT delete emails, accounts, or AI models
+    /// - Report actual bytes freed
     private func clearCache() {
-        // TODO: Implement cache clearing when attachment/search cache layers are built.
-        // Should remove downloaded attachments and regenerable caches
-        // (search embeddings, AI category cache) without deleting emails/accounts/AI models.
+        // V1: No-op — no persistent caches exist yet.
+        // When cache layers are built, call their clear methods here.
     }
 
     private func wipeAllData() {
@@ -260,7 +310,18 @@ public struct SettingsView: View {
             if currentSettings.authorizationStatus == .notDetermined {
                 _ = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
             }
+            // Re-check after requesting — update denied state for UX
+            await checkNotificationPermission()
         }
+        #endif
+    }
+
+    /// Check OS notification permission status and update denied-state flag.
+    private func checkNotificationPermission() async {
+        #if canImport(UserNotifications)
+        let center = UNUserNotificationCenter.current()
+        let currentSettings = await center.notificationSettings()
+        notificationPermissionDenied = currentSettings.authorizationStatus == .denied
         #endif
     }
 }
@@ -330,16 +391,36 @@ struct CategoryTabsSettingsView: View {
         (AICategory.updates.rawValue, "Updates"),
     ]
 
+    /// Whether the AI model is downloaded and available for categorization.
+    /// PARTIAL SCOPE — V1 STUB: Always returns false until Data/AI/ layer is built.
+    /// Wire to real AI model availability check when AIModelManager is implemented.
+    private var isAIModelAvailable: Bool {
+        // TODO: Replace with real check via AIModelManager (IOS-F-06).
+        false
+    }
+
     var body: some View {
         @Bindable var settings = settings
         List {
-            // TODO: Check AI model availability when Data/AI/ is implemented.
-            // For now, always show toggles as enabled.
-            ForEach(toggleableCategories, id: \.0) { key, label in
-                Toggle(label, isOn: Binding(
-                    get: { settings.categoryTabVisibility[key] ?? true },
-                    set: { settings.categoryTabVisibility[key] = $0 }
-                ))
+            if !isAIModelAvailable {
+                Section {
+                    Label(
+                        "Download the AI model to enable smart categories.",
+                        systemImage: "arrow.down.circle"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                ForEach(toggleableCategories, id: \.0) { key, label in
+                    Toggle(label, isOn: Binding(
+                        get: { settings.categoryTabVisibility[key] ?? true },
+                        set: { settings.categoryTabVisibility[key] = $0 }
+                    ))
+                    .disabled(!isAIModelAvailable)
+                }
             }
         }
         .navigationTitle("Category Tabs")

@@ -6,6 +6,7 @@ import PrivateMailFeature
 struct PrivateMailApp: App {
     let modelContainer: ModelContainer
     let settingsStore: SettingsStore
+    let appLockManager: AppLockManager
     let manageAccounts: ManageAccountsUseCaseProtocol
 
     init() {
@@ -16,6 +17,7 @@ struct PrivateMailApp: App {
         }
 
         settingsStore = SettingsStore()
+        appLockManager = AppLockManager()
 
         let keychainManager = KeychainManager()
         let oauthManager = OAuthManager(clientId: AppConstants.oauthClientId)
@@ -33,7 +35,7 @@ struct PrivateMailApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(manageAccounts: manageAccounts)
+            ContentView(manageAccounts: manageAccounts, appLockManager: appLockManager)
                 .environment(settingsStore)
         }
         .modelContainer(modelContainer)

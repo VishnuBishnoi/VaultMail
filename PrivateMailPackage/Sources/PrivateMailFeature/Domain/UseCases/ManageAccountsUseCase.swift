@@ -98,10 +98,11 @@ public final class ManageAccountsUseCase: ManageAccountsUseCaseProtocol {
             throw error
         }
 
-        // Step 6: Validate IMAP/SMTP connectivity (FR-ACCT-01)
-        // TODO: Implement IMAP LOGIN + NOOP validation when sync layer is built.
-        // For V1, this step succeeds unconditionally. The actual IMAP client
-        // (Data/Network/) does not exist yet.
+        // PARTIAL SCOPE: IMAP/SMTP validation deferred (FR-ACCT-01, FR-OB-01 step 2).
+        // Blocked on Data/Network/IMAPClient (not yet built — IOS-F-05).
+        // Real implementation MUST: connect to imap.gmail.com:993 with XOAUTH2,
+        // send LOGIN + NOOP, and fail account creation if unreachable.
+        // For V1, this step succeeds unconditionally.
 
         return account
     }

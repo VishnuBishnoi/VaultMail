@@ -65,7 +65,12 @@ struct PrivacyPolicyView: View {
                 Text("All AI features (smart categories, reply suggestions, summarization) run entirely on your device using a locally downloaded model. No email content is sent to cloud AI services.")
                     .font(.body)
 
-                // TODO: Link to full privacy policy URL when available.
+                // Full privacy policy URL (Constitution LG-02)
+                // TODO: Replace with actual hosted privacy policy URL before App Store submission.
+                if let url = URL(string: "https://privatemail.app/privacy") {
+                    Link("View Full Privacy Policy", destination: url)
+                        .font(.callout)
+                }
             }
             .padding()
         }

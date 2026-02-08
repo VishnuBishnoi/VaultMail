@@ -134,9 +134,12 @@ struct OnboardingAIModelStep: View {
 
     // MARK: - Actions
 
-    /// V1 STUB: Simulates AI model download with progress.
-    /// Real implementation will use HTTPS with HTTP Range (resumable)
-    /// and SHA-256 integrity verification.
+    /// PARTIAL SCOPE — V1 STUB: Simulates AI model download with progress.
+    /// Blocked on Data/AI/ layer (not yet built). Real implementation MUST:
+    /// - Use HTTPS with HTTP Range headers for resumable downloads (FR-SET-04)
+    /// - Perform SHA-256 integrity verification post-download (FR-OB-01 step 4)
+    /// - Clean up corrupted files on checksum mismatch
+    /// Tracked in: AI Model Management epic
     private func startDownload() {
         downloadState = .downloading(progress: 0)
         Task {

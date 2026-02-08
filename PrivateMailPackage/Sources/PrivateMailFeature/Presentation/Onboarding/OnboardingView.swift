@@ -92,9 +92,12 @@ public struct OnboardingView: View {
         // Mark onboarding complete — do not re-display on subsequent launches
         settingsStore.isOnboardingComplete = true
 
-        // TODO: Trigger initial sync for all added accounts (Email Sync FR-SYNC-01)
-        // The sync engine does not exist yet. When implemented, call:
-        // for account in addedAccounts { syncEngine.startInitialSync(for: account) }
+        // PARTIAL SCOPE: Initial sync trigger deferred (Email Sync FR-SYNC-01).
+        // The sync engine (Data/Sync/) does not exist yet — blocked on IOS-F-05/F-06.
+        // When implemented, this MUST call:
+        //   for account in addedAccounts { syncEngine.startInitialSync(for: account) }
+        // Until then, onboarding completes without triggering sync.
+        // Tracked in: https://github.com/VishnuBishnoi/email/issues (Email Sync epic)
     }
 }
 

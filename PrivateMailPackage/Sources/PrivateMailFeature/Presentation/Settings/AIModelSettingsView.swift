@@ -132,7 +132,12 @@ struct AIModelSettingsView: View {
 
     // MARK: - Actions
 
-    /// V1 STUB: Simulates download. See OnboardingAIModelStep for identical logic.
+    /// PARTIAL SCOPE — V1 STUB: Simulates download.
+    /// Blocked on Data/AI/ layer. Real implementation MUST provide:
+    /// - HTTPS download with HTTP Range resume support (FR-SET-04)
+    /// - Post-download SHA-256 integrity verification
+    /// - Corrupted file cleanup on checksum mismatch
+    /// See OnboardingAIModelStep for identical stub logic.
     private func startDownload() {
         downloadState = .downloading(progress: 0)
         Task {
