@@ -128,4 +128,45 @@ struct ComposerCoreTests {
         #expect(html.contains("<a href=\"https://example.com\">site</a>"))
         #expect(!html.contains("<script>"))
     }
+
+    @Test("Send validator requires at least one valid recipient and no invalid addresses")
+    func sendValidationRules() {
+        let resultA = ComposerSendValidator.validate(
+            to: ["alice@example.com"],
+            cc: [],
+            bcc: [],
+            attachmentTotalBytes: 100
+        )
+        #expect(resultA.canSend)
+
+        let resultB = ComposerSendValidator.validate(
+            to: ["alice@"],
+            cc: [],
+            bcc: [],
+            attachmentTotalBytes: 100
+        )
+        #expect(!resultB.canSend)
+        #expect(resultB.invalidAddresses == ["alice@"])
+
+        let resultC = ComposerSendValidator.validate(
+            to: [],
+            cc: ["carol@example.com"],
+            bcc: [],
+            attachmentTotalBytes: ComposerAttachmentPolicy.maxTotalSizeBytes + 1
+        )
+        #expect(!resultC.canSend)
+        #expect(resultC.exceedsAttachmentLimit)
+    }
+
+    @Test("Send prompts are required for empty subject or empty body")
+    func sendPromptRules() {
+        let both = ComposerSendPromptPolicy.requiredPrompts(subject: "", body: "")
+        #expect(both == [.emptySubject, .emptyBody])
+
+        let subjectOnly = ComposerSendPromptPolicy.requiredPrompts(subject: "", body: "x")
+        #expect(subjectOnly == [.emptySubject])
+
+        let none = ComposerSendPromptPolicy.requiredPrompts(subject: "Hi", body: "x")
+        #expect(none.isEmpty)
+    }
 }

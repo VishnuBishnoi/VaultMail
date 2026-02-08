@@ -326,3 +326,51 @@ public enum ComposerMarkdownRenderer {
             .replacingOccurrences(of: ">", with: "&gt;")
     }
 }
+
+public struct ComposerSendValidation: Sendable, Equatable {
+    public let canSend: Bool
+    public let invalidAddresses: [String]
+    public let exceedsAttachmentLimit: Bool
+}
+
+public enum ComposerSendValidator {
+    public static func validate(
+        to: [String],
+        cc: [String],
+        bcc: [String],
+        attachmentTotalBytes: Int
+    ) -> ComposerSendValidation {
+        let addresses = (to + cc + bcc)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let invalid = addresses.filter { !EmailAddressValidator.isValid($0) }
+        let hasAnyValid = addresses.contains { EmailAddressValidator.isValid($0) }
+        let attachmentPolicy = ComposerAttachmentPolicy.evaluate(totalSizeBytes: attachmentTotalBytes)
+        let canSend = invalid.isEmpty && hasAnyValid && attachmentPolicy.canSend
+
+        return ComposerSendValidation(
+            canSend: canSend,
+            invalidAddresses: invalid,
+            exceedsAttachmentLimit: !attachmentPolicy.canSend
+        )
+    }
+}
+
+public enum ComposerSendPrompt: Sendable, Equatable {
+    case emptySubject
+    case emptyBody
+}
+
+public enum ComposerSendPromptPolicy {
+    public static func requiredPrompts(subject: String, body: String) -> [ComposerSendPrompt] {
+        var prompts: [ComposerSendPrompt] = []
+        if subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            prompts.append(.emptySubject)
+        }
+        if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            prompts.append(.emptyBody)
+        }
+        return prompts
+    }
+}
