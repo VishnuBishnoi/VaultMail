@@ -18,7 +18,7 @@ struct PrivateMailApp: App {
         settingsStore = SettingsStore()
 
         let keychainManager = KeychainManager()
-        let oauthManager = OAuthManager(clientId: AppConstants.oauthRedirectScheme)
+        let oauthManager = OAuthManager(clientId: AppConstants.oauthClientId)
         let accountRepo = AccountRepositoryImpl(
             modelContainer: modelContainer,
             keychainManager: keychainManager,
