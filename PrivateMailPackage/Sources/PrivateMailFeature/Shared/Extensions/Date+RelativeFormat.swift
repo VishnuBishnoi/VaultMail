@@ -7,7 +7,7 @@ import Foundation
 /// - Yesterday: "Yesterday"
 /// - This week (2-6 days ago): "Tue" (abbreviated weekday)
 /// - This year (older than this week): "Jan 15" (month + day)
-/// - Older years: "1/15/24" (short numeric date)
+/// - Older years: "Jan 15, 2024" (abbreviated month, day, full year)
 ///
 /// Spec ref: Thread List spec FR-TL-01 (Timestamp)
 extension Date {
@@ -47,9 +47,9 @@ extension Date {
             return formatter.string(from: self)
         }
 
-        // Older years: short numeric
+        // Older years: readable date with abbreviated month
         let formatter = DateFormatter()
-        formatter.dateFormat = "M/d/yy"
+        formatter.dateFormat = "MMM d, yyyy"
         return formatter.string(from: self)
     }
 }

@@ -91,4 +91,16 @@ struct ParticipantTests {
         #expect(participants[0].name == "First")
         #expect(participants[2].name == "Third")
     }
+
+    @Test("Display name for email without @ returns full email")
+    func displayNameNoAtSymbol() {
+        let p = Participant(name: nil, email: "localhost")
+        #expect(p.displayName == "localhost")
+    }
+
+    @Test("Encode empty array returns '[]'")
+    func encodeEmptyArray() {
+        let result = Participant.encode([])
+        #expect(result == "[]")
+    }
 }

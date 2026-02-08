@@ -261,4 +261,38 @@ struct FetchThreadsUseCaseTests {
             )
         }
     }
+
+    @Test("fetchUnifiedThreads error wraps as fetchFailed")
+    func fetchUnifiedThreadsErrorPropagation() async throws {
+        let (useCase, repo) = Self.makeSUT()
+        repo.errorToThrow = NSError(domain: "TestError", code: 43, userInfo: [NSLocalizedDescriptionKey: "DB failure"])
+
+        await #expect(throws: ThreadListError.self) {
+            _ = try await useCase.fetchUnifiedThreads(
+                category: nil,
+                cursor: nil,
+                pageSize: 25
+            )
+        }
+    }
+
+    @Test("fetchFolders error wraps as fetchFailed")
+    func fetchFoldersErrorPropagation() async throws {
+        let (useCase, repo) = Self.makeSUT()
+        repo.errorToThrow = NSError(domain: "TestError", code: 44, userInfo: [NSLocalizedDescriptionKey: "Folder read error"])
+
+        await #expect(throws: ThreadListError.self) {
+            _ = try await useCase.fetchFolders(accountId: "acc1")
+        }
+    }
+
+    @Test("fetchOutboxEmails error wraps as fetchFailed")
+    func fetchOutboxEmailsErrorPropagation() async throws {
+        let (useCase, repo) = Self.makeSUT()
+        repo.errorToThrow = NSError(domain: "TestError", code: 45, userInfo: [NSLocalizedDescriptionKey: "Outbox read error"])
+
+        await #expect(throws: ThreadListError.self) {
+            _ = try await useCase.fetchOutboxEmails(accountId: "acc1")
+        }
+    }
 }

@@ -40,14 +40,16 @@ struct ThreadRowView: View {
 
     private var senderText: String {
         guard !participants.isEmpty else { return "Unknown" }
-        let first = participants[0].displayName
-        if participants.count > 1 {
-            if participants.count == 2 {
-                return "\(first), \(participants[1].displayName)"
-            }
-            return "\(first) (\(participants.count))"
+        let names: String
+        if participants.count >= 2 {
+            names = "\(participants[0].displayName), \(participants[1].displayName)"
+        } else {
+            names = participants[0].displayName
         }
-        return first
+        if thread.messageCount > 1 {
+            return "\(names) (\(thread.messageCount))"
+        }
+        return names
     }
 
     private var timestampText: String {

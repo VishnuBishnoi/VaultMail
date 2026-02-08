@@ -339,8 +339,30 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
         guard let thread = try context.fetch(descriptor).first else {
             throw ThreadListError.threadNotFound(id: id)
         }
-        // V1: delete thread (real implementation would move to Archive folder)
-        context.delete(thread)
+
+        // Find the Archive folder for this thread's account
+        let threadAccountId = thread.accountId
+        let archiveType = FolderType.archive.rawValue
+        var archiveDescriptor = FetchDescriptor<Folder>(
+            predicate: #Predicate { $0.account?.id == threadAccountId && $0.folderType == archiveType }
+        )
+        archiveDescriptor.fetchLimit = 1
+
+        guard let archiveFolder = try context.fetch(archiveDescriptor).first else {
+            throw ThreadListError.folderNotFound(id: "archive(\(threadAccountId))")
+        }
+
+        // Move all emails in the thread to the Archive folder
+        for email in thread.emails {
+            for ef in email.emailFolders {
+                context.delete(ef)
+            }
+            let newEF = EmailFolder(imapUID: 0)
+            newEF.email = email
+            newEF.folder = archiveFolder
+            context.insert(newEF)
+        }
+
         try context.save()
     }
 
@@ -354,8 +376,30 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
         guard let thread = try context.fetch(descriptor).first else {
             throw ThreadListError.threadNotFound(id: id)
         }
-        // V1: delete thread (real implementation would move to Trash)
-        context.delete(thread)
+
+        // Find the Trash folder for this thread's account
+        let threadAccountId = thread.accountId
+        let trashType = FolderType.trash.rawValue
+        var trashDescriptor = FetchDescriptor<Folder>(
+            predicate: #Predicate { $0.account?.id == threadAccountId && $0.folderType == trashType }
+        )
+        trashDescriptor.fetchLimit = 1
+
+        guard let trashFolder = try context.fetch(trashDescriptor).first else {
+            throw ThreadListError.folderNotFound(id: "trash(\(threadAccountId))")
+        }
+
+        // Move all emails in the thread to the Trash folder
+        for email in thread.emails {
+            for ef in email.emailFolders {
+                context.delete(ef)
+            }
+            let newEF = EmailFolder(imapUID: 0)
+            newEF.email = email
+            newEF.folder = trashFolder
+            context.insert(newEF)
+        }
+
         try context.save()
     }
 

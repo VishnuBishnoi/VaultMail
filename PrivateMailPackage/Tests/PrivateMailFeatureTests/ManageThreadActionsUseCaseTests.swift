@@ -138,6 +138,17 @@ struct ManageThreadActionsUseCaseTests {
         #expect(repo.moveThreadsCallCount == 1)
     }
 
+    // MARK: - Batch Edge Cases
+
+    @Test("moveThreads batch with multiple ids delegates to repository")
+    func moveThreadsBatchMultipleIdsDelegates() async throws {
+        let (useCase, repo) = Self.makeSUT()
+
+        try await useCase.moveThreads(ids: ["t1", "t2"], toFolderId: "folder-archive")
+
+        #expect(repo.moveThreadsCallCount == 1)
+    }
+
     // MARK: - Error Propagation
 
     @Test("Error propagation wraps as ThreadListError.actionFailed")

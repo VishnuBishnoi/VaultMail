@@ -63,6 +63,24 @@ struct EmailRepositoryImplTests {
         sent.account = account
         context.insert(sent)
 
+        let archive = Folder(
+            id: "folder-archive",
+            name: "All Mail",
+            imapPath: "[Gmail]/All Mail",
+            folderType: FolderType.archive.rawValue
+        )
+        archive.account = account
+        context.insert(archive)
+
+        let trash = Folder(
+            id: "folder-trash",
+            name: "Trash",
+            imapPath: "[Gmail]/Trash",
+            folderType: FolderType.trash.rawValue
+        )
+        trash.account = account
+        context.insert(trash)
+
         let now = Date()
 
         // Thread 1: in inbox, primary, 2 unread, latest = now
@@ -167,6 +185,8 @@ struct EmailRepositoryImplTests {
             account: account,
             inbox: inbox,
             sent: sent,
+            archive: archive,
+            trash: trash,
             thread1: thread1,
             thread2: thread2,
             thread3: thread3,
@@ -181,6 +201,8 @@ struct EmailRepositoryImplTests {
         let account: Account
         let inbox: Folder
         let sent: Folder
+        let archive: Folder
+        let trash: Folder
         let thread1: PrivateMailFeature.Thread
         let thread2: PrivateMailFeature.Thread
         let thread3: PrivateMailFeature.Thread
@@ -506,7 +528,7 @@ struct EmailRepositoryImplTests {
 
     // MARK: - Archive Thread
 
-    @Test("archiveThread removes thread from store")
+    @Test("archiveThread moves thread emails to Archive folder")
     @MainActor
     func archiveThreadRemoves() async throws {
         let container = try makeContainer()
@@ -515,9 +537,21 @@ struct EmailRepositoryImplTests {
 
         try await repo.archiveThread(id: data.thread1.id)
 
-        let remaining = try await repo.getThreads(accountId: "acc-1")
-        #expect(remaining.count == 2)
-        #expect(!remaining.contains { $0.id == "thread-1" })
+        // Thread still exists (move, not delete)
+        let thread = try await repo.getThread(id: data.thread1.id)
+        #expect(thread != nil)
+
+        // Thread should no longer appear in inbox
+        let inboxThreads = try await repo.getThreads(
+            folderId: data.inbox.id, category: nil, cursor: nil, limit: 25
+        )
+        #expect(!inboxThreads.contains { $0.id == "thread-1" })
+
+        // Thread should now be in archive
+        let archiveThreads = try await repo.getThreads(
+            folderId: data.archive.id, category: nil, cursor: nil, limit: 25
+        )
+        #expect(archiveThreads.contains { $0.id == "thread-1" })
     }
 
     @Test("archiveThread throws for non-existent thread")
@@ -533,7 +567,7 @@ struct EmailRepositoryImplTests {
 
     // MARK: - Delete Thread
 
-    @Test("deleteThread removes thread from store")
+    @Test("deleteThread moves thread emails to Trash folder")
     @MainActor
     func deleteThreadRemoves() async throws {
         let container = try makeContainer()
@@ -542,9 +576,21 @@ struct EmailRepositoryImplTests {
 
         try await repo.deleteThread(id: data.thread2.id)
 
-        let remaining = try await repo.getThreads(accountId: "acc-1")
-        #expect(remaining.count == 2)
-        #expect(!remaining.contains { $0.id == "thread-2" })
+        // Thread still exists (move to trash, not hard-delete)
+        let thread = try await repo.getThread(id: data.thread2.id)
+        #expect(thread != nil)
+
+        // Thread should no longer appear in inbox
+        let inboxThreads = try await repo.getThreads(
+            folderId: data.inbox.id, category: nil, cursor: nil, limit: 25
+        )
+        #expect(!inboxThreads.contains { $0.id == "thread-2" })
+
+        // Thread should now be in trash
+        let trashThreads = try await repo.getThreads(
+            folderId: data.trash.id, category: nil, cursor: nil, limit: 25
+        )
+        #expect(trashThreads.contains { $0.id == "thread-2" })
     }
 
     // MARK: - Toggle Read Status
@@ -717,7 +763,7 @@ struct EmailRepositoryImplTests {
         #expect(t3?.isStarred == true)
     }
 
-    @Test("batch deleteThreads removes multiple threads")
+    @Test("batch deleteThreads moves multiple threads to Trash")
     @MainActor
     func batchDelete() async throws {
         let container = try makeContainer()
@@ -726,9 +772,26 @@ struct EmailRepositoryImplTests {
 
         try await repo.deleteThreads(ids: [data.thread1.id, data.thread2.id])
 
-        let remaining = try await repo.getThreads(accountId: "acc-1")
-        #expect(remaining.count == 1)
-        #expect(remaining[0].id == "thread-3")
+        // Both threads still exist (moved to trash, not hard-deleted)
+        let t1 = try await repo.getThread(id: data.thread1.id)
+        let t2 = try await repo.getThread(id: data.thread2.id)
+        #expect(t1 != nil)
+        #expect(t2 != nil)
+
+        // Inbox should only have thread3's email remaining... but thread3 is in sent
+        // So inbox should be empty
+        let inboxThreads = try await repo.getThreads(
+            folderId: data.inbox.id, category: nil, cursor: nil, limit: 25
+        )
+        #expect(inboxThreads.isEmpty)
+
+        // Both threads should be in trash
+        let trashThreads = try await repo.getThreads(
+            folderId: data.trash.id, category: nil, cursor: nil, limit: 25
+        )
+        let trashIds = Set(trashThreads.map(\.id))
+        #expect(trashIds.contains("thread-1"))
+        #expect(trashIds.contains("thread-2"))
     }
 
     // MARK: - Basic CRUD
@@ -741,11 +804,13 @@ struct EmailRepositoryImplTests {
         let repo = makeRepo(container: container)
 
         let folders = try await repo.getFolders(accountId: data.account.id)
-        #expect(folders.count == 2)
+        #expect(folders.count == 4)
 
         let names = Set(folders.map(\.name))
         #expect(names.contains("Inbox"))
         #expect(names.contains("Sent"))
+        #expect(names.contains("All Mail"))
+        #expect(names.contains("Trash"))
     }
 
     @Test("saveFolder inserts new folder")
@@ -834,5 +899,173 @@ struct EmailRepositoryImplTests {
         let sentEmails = try await repo.getEmails(folderId: data.sent.id)
         #expect(sentEmails.count == 1)
         #expect(sentEmails[0].id == "email-3")
+    }
+
+    // MARK: - saveEmail
+
+    @Test("saveEmail inserts new email")
+    @MainActor
+    func saveEmailInsert() async throws {
+        let container = try makeContainer()
+        let data = try insertTestData(container: container)
+        let repo = makeRepo(container: container)
+
+        let newEmail = Email(
+            id: "email-new",
+            accountId: "acc-1",
+            threadId: data.thread1.id,
+            messageId: "<new@test.com>",
+            fromAddress: "new@test.com",
+            subject: "New Email"
+        )
+        try await repo.saveEmail(newEmail)
+
+        let context = ModelContext(container)
+        var descriptor = FetchDescriptor<Email>(
+            predicate: #Predicate { $0.id == "email-new" }
+        )
+        descriptor.fetchLimit = 1
+        let fetched = try context.fetch(descriptor)
+        #expect(fetched.count == 1)
+        #expect(fetched[0].subject == "New Email")
+        #expect(fetched[0].fromAddress == "new@test.com")
+    }
+
+    @Test("saveEmail updates existing email fields")
+    @MainActor
+    func saveEmailUpdate() async throws {
+        let container = try makeContainer()
+        let data = try insertTestData(container: container)
+        let repo = makeRepo(container: container)
+
+        // Modify email1's subject and isRead
+        let updated = Email(
+            id: data.email1.id,
+            accountId: "acc-1",
+            threadId: data.thread1.id,
+            messageId: "<msg1@test.com>",
+            fromAddress: "sender@test.com",
+            subject: "Updated Subject",
+            isRead: true
+        )
+        try await repo.saveEmail(updated)
+
+        let context = ModelContext(container)
+        var descriptor = FetchDescriptor<Email>(
+            predicate: #Predicate { $0.id == "email-1" }
+        )
+        descriptor.fetchLimit = 1
+        let fetched = try context.fetch(descriptor)
+        #expect(fetched.count == 1)
+        #expect(fetched[0].subject == "Updated Subject")
+        #expect(fetched[0].isRead == true)
+    }
+
+    // MARK: - deleteEmail
+
+    @Test("deleteEmail removes email from store")
+    @MainActor
+    func deleteEmailRemoves() async throws {
+        let container = try makeContainer()
+        let data = try insertTestData(container: container)
+        let repo = makeRepo(container: container)
+
+        try await repo.deleteEmail(id: data.email1.id)
+
+        let context = ModelContext(container)
+        var descriptor = FetchDescriptor<Email>(
+            predicate: #Predicate { $0.id == "email-1" }
+        )
+        descriptor.fetchLimit = 1
+        let fetched = try context.fetch(descriptor)
+        #expect(fetched.isEmpty)
+
+        // Thread should still exist
+        let thread = try await repo.getThread(id: data.thread1.id)
+        #expect(thread != nil)
+    }
+
+    @Test("deleteEmail with non-existent id does nothing")
+    @MainActor
+    func deleteEmailNotFoundNoError() async throws {
+        let container = try makeContainer()
+        _ = try insertTestData(container: container)
+        let repo = makeRepo(container: container)
+
+        // Should not throw
+        try await repo.deleteEmail(id: "non-existent-email-id")
+    }
+
+    // MARK: - markThreadsRead with empty ids
+
+    @Test("markThreadsRead with empty ids does nothing")
+    @MainActor
+    func batchEmptyIds() async throws {
+        let container = try makeContainer()
+        _ = try insertTestData(container: container)
+        let repo = makeRepo(container: container)
+
+        // Should succeed without error
+        try await repo.markThreadsRead(ids: [])
+    }
+
+    // MARK: - getOutboxEmails cross-account
+
+    @Test("getOutboxEmails with nil accountId returns all accounts")
+    @MainActor
+    func outboxEmailsCrossAccount() async throws {
+        let container = try makeContainer()
+        let context = ModelContext(container)
+
+        // Account 1 thread + email
+        let thread1 = PrivateMailFeature.Thread(
+            id: "outbox-cross-t1",
+            accountId: "acc-a",
+            subject: "Cross A"
+        )
+        context.insert(thread1)
+
+        let email1 = Email(
+            id: "outbox-cross-e1",
+            accountId: "acc-a",
+            threadId: "outbox-cross-t1",
+            messageId: "<cross1@test.com>",
+            fromAddress: "a@test.com",
+            subject: "Queued A",
+            sendState: SendState.queued.rawValue
+        )
+        email1.thread = thread1
+        context.insert(email1)
+
+        // Account 2 thread + email
+        let thread2 = PrivateMailFeature.Thread(
+            id: "outbox-cross-t2",
+            accountId: "acc-b",
+            subject: "Cross B"
+        )
+        context.insert(thread2)
+
+        let email2 = Email(
+            id: "outbox-cross-e2",
+            accountId: "acc-b",
+            threadId: "outbox-cross-t2",
+            messageId: "<cross2@test.com>",
+            fromAddress: "b@test.com",
+            subject: "Failed B",
+            sendState: SendState.failed.rawValue
+        )
+        email2.thread = thread2
+        context.insert(email2)
+
+        try context.save()
+
+        let repo = makeRepo(container: container)
+
+        let outbox = try await repo.getOutboxEmails(accountId: nil)
+        #expect(outbox.count == 2)
+
+        let outboxIds = Set(outbox.map(\.id))
+        #expect(outboxIds.contains("outbox-cross-e1"))
+        #expect(outboxIds.contains("outbox-cross-e2"))
     }
 }

@@ -74,8 +74,23 @@ struct ThreadListView: View {
     @State private var isMultiSelectMode = false
     @State private var selectedThreadIds: Set<String> = []
 
-    // Account switcher placeholder
+    // Account switcher sheet
     @State private var showAccountSwitcher = false
+
+    // Inline error banner (Comment 3: show banner when threads already loaded)
+    @State private var errorBannerMessage: String? = nil
+
+    // Outbox emails (Comment 6: display outbox with OutboxRowView)
+    @State private var outboxEmails: [Email] = []
+
+    // Category per folder (Comment 9: persist selected category per folder)
+    @State private var categoryPerFolder: [String: String?] = [:]
+
+    // Pagination error (Comment 10: inline retry on pagination failure)
+    @State private var paginationError: Bool = false
+
+    // Move-to-folder sheet for multi-select (Comment 7)
+    @State private var showMoveSheet = false
 
     // MARK: - Derived State
 
@@ -93,12 +108,18 @@ struct ThreadListView: View {
         return selectedFolder?.name ?? "Inbox"
     }
 
-    /// Whether to show category tabs (hidden for Outbox and when no categories visible).
+    /// Whether to show category tabs (hidden for Outbox, when no categories visible,
+    /// or when AI categorization hasn't been applied to any thread).
     private var showCategoryTabs: Bool {
         guard !isOutboxSelected else { return false }
-        // Show if at least one category is visible in settings
         let hasVisibleCategories = settings.categoryTabVisibility.values.contains(true)
-        return hasVisibleCategories
+        // Hide when AI categorization hasn't been applied to any thread
+        let uncategorizedRaw = AICategory.uncategorized.rawValue
+        let hasAICategorizedThreads = threads.contains {
+            guard let cat = $0.aiCategory else { return false }
+            return cat != uncategorizedRaw
+        }
+        return hasVisibleCategories && hasAICategorizedThreads
     }
 
     /// Account color for unified mode (for thread row indicators).
@@ -132,10 +153,25 @@ struct ThreadListView: View {
             .sheet(isPresented: $showComposer) {
                 ComposerPlaceholder(fromAccount: selectedAccount?.email)
             }
-            .alert("Switch Account", isPresented: $showAccountSwitcher) {
-                accountSwitcherButtons
-            } message: {
-                Text("Select an account to view")
+            .sheet(isPresented: $showAccountSwitcher) {
+                AccountSwitcherSheet(
+                    accounts: accounts,
+                    selectedAccountId: selectedAccount?.id,
+                    onSelectAccount: { accountId in
+                        if let accountId {
+                            if let account = accounts.first(where: { $0.id == accountId }) {
+                                selectedAccount = account
+                                selectedCategory = nil
+                                Task { await switchToAccount(account) }
+                            }
+                        } else {
+                            selectedAccount = nil
+                            selectedFolder = nil
+                            selectedCategory = nil
+                            Task { await reloadThreads() }
+                        }
+                    }
+                )
             }
         }
         .task {
@@ -189,50 +225,28 @@ struct ThreadListView: View {
     // MARK: - Thread List
 
     private var threadListView: some View {
-        List {
-            ForEach(threads, id: \.id) { thread in
-                NavigationLink(value: thread.id) {
-                    ThreadRowView(
-                        thread: thread,
-                        isMultiSelectMode: isMultiSelectMode,
-                        isSelected: selectedThreadIds.contains(thread.id),
-                        accountColor: accountColor(for: thread)
-                    )
-                }
-                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                    Button {
-                        Task { await archiveThread(thread) }
-                    } label: {
-                        Label("Archive", systemImage: "archivebox")
-                    }
-                    .tint(.blue)
-                }
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
-                        Task { await deleteThread(thread) }
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                }
-                // TODO: Add swipe actions for read/unread toggle, star, move (Phase 6 integration)
+        ZStack(alignment: .bottom) {
+            threadListContent
+            multiSelectOverlay
+        }
+        .sheet(isPresented: $showMoveSheet) {
+            MoveToFolderSheet(folders: folders) { folderId in
+                Task { await batchMove(toFolderId: folderId) }
             }
+        }
+    }
 
-            // Pagination sentinel
-            if hasMorePages {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                        .padding(.vertical, 8)
-                    Spacer()
-                }
-                .listRowSeparator(.hidden)
-                .onAppear {
-                    Task { await loadMoreThreads() }
-                }
-            }
+    @ViewBuilder
+    private var threadListContent: some View {
+        List {
+            errorBannerRow
+            threadOrOutboxRows
+            paginationRow
         }
         .listStyle(.plain)
         .refreshable {
+            // TODO: Trigger incremental sync via SyncUseCase (FR-SYNC-02) when sync layer is built
+            errorBannerMessage = nil
             await reloadThreads()
         }
         .navigationDestination(for: String.self) { threadId in
@@ -241,6 +255,163 @@ struct ThreadListView: View {
             }
         }
         .accessibilityLabel("Email threads")
+    }
+
+    @ViewBuilder
+    private var errorBannerRow: some View {
+        // Comment 3: Inline error banner when threads are already loaded
+        if let errorBannerMessage {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(errorBannerMessage)
+                    .font(.subheadline)
+                    .lineLimit(2)
+                Spacer()
+                Button {
+                    self.errorBannerMessage = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.vertical, 4)
+            .listRowBackground(Color.orange.opacity(0.1))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Error: \(errorBannerMessage)")
+        }
+    }
+
+    @ViewBuilder
+    private var threadOrOutboxRows: some View {
+        // Comment 6: Show outbox rows when outbox folder is selected
+        if isOutboxSelected {
+            ForEach(outboxEmails, id: \.id) { email in
+                OutboxRowView(
+                    email: email,
+                    onRetry: {
+                        // TODO: Retry sending via SendQueueUseCase when sync layer is built
+                    },
+                    onCancel: {
+                        // TODO: Cancel sending via SendQueueUseCase when sync layer is built
+                    }
+                )
+            }
+        } else {
+            ForEach(threads, id: \.id) { thread in
+                threadRow(for: thread)
+                // TODO: Add swipe actions for read/unread toggle, star, move (Phase 6 integration)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func threadRow(for thread: PrivateMailFeature.Thread) -> some View {
+        if isMultiSelectMode {
+            // In multi-select mode, tapping toggles selection instead of navigating
+            Button {
+                toggleThreadSelection(thread.id)
+            } label: {
+                ThreadRowView(
+                    thread: thread,
+                    isMultiSelectMode: isMultiSelectMode,
+                    isSelected: selectedThreadIds.contains(thread.id),
+                    accountColor: accountColor(for: thread)
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink(value: thread.id) {
+                ThreadRowView(
+                    thread: thread,
+                    isMultiSelectMode: isMultiSelectMode,
+                    isSelected: selectedThreadIds.contains(thread.id),
+                    accountColor: accountColor(for: thread)
+                )
+            }
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                Button {
+                    Task { await archiveThread(thread) }
+                } label: {
+                    Label("Archive", systemImage: "archivebox")
+                }
+                .tint(.blue)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button(role: .destructive) {
+                    Task { await deleteThread(thread) }
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+            // Comment 7: Long-press to enter multi-select mode
+            .onLongPressGesture {
+                isMultiSelectMode = true
+                selectedThreadIds.insert(thread.id)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var paginationRow: some View {
+        // Comment 10: Pagination sentinel with inline retry on failure
+        if paginationError {
+            Button {
+                paginationError = false
+                Task { await loadMoreThreads() }
+            } label: {
+                HStack {
+                    Spacer()
+                    Text("Tap to retry")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.accentColor)
+                    Spacer()
+                }
+            }
+            .padding(.vertical, 8)
+            .listRowSeparator(.hidden)
+        } else if hasMorePages {
+            HStack {
+                Spacer()
+                ProgressView()
+                    .padding(.vertical, 8)
+                Spacer()
+            }
+            .listRowSeparator(.hidden)
+            .onAppear {
+                Task { await loadMoreThreads() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var multiSelectOverlay: some View {
+        // Comment 7: Multi-select toolbar overlay
+        if isMultiSelectMode {
+            MultiSelectToolbar(
+                selectedCount: selectedThreadIds.count,
+                onArchive: {
+                    Task { await batchArchive() }
+                },
+                onDelete: {
+                    Task { await batchDelete() }
+                },
+                onMarkRead: {
+                    Task { await batchMarkRead() }
+                },
+                onMarkUnread: {
+                    Task { await batchMarkUnread() }
+                },
+                onStar: {
+                    Task { await batchStar() }
+                },
+                onMove: {
+                    showMoveSheet = true
+                }
+            )
+        }
     }
 
     // MARK: - Empty States
@@ -338,9 +509,7 @@ struct ThreadListView: View {
                 } else {
                     ForEach(folders, id: \.id) { folder in
                         Button {
-                            selectedFolder = folder
-                            selectedCategory = nil
-                            Task { await reloadThreads() }
+                            selectFolder(folder)
                         } label: {
                             Label(folder.name, systemImage: folderIcon(for: folder))
                         }
@@ -386,32 +555,15 @@ struct ThreadListView: View {
             .accessibilityLabel("Settings")
         }
 
-        // TODO: Add multi-select toolbar (Phase 6 integration)
-    }
-
-    // MARK: - Account Switcher Alert Buttons
-
-    @ViewBuilder
-    private var accountSwitcherButtons: some View {
-        // "All Accounts" unified option
-        Button("All Accounts") {
-            selectedAccount = nil
-            selectedFolder = nil
-            selectedCategory = nil
-            Task { await reloadThreads() }
-        }
-
-        // Individual accounts
-        ForEach(accounts, id: \.id) { account in
-            Button(account.email) {
-                selectedAccount = account
-                selectedFolder = nil
-                selectedCategory = nil
-                Task { await switchToAccount(account) }
+        // Multi-select cancel button
+        if isMultiSelectMode {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    isMultiSelectMode = false
+                    selectedThreadIds.removeAll()
+                }
             }
         }
-
-        Button("Cancel", role: .cancel) {}
     }
 
     // MARK: - Data Loading
@@ -495,7 +647,13 @@ struct ThreadListView: View {
                 viewState = .loaded
             }
         } catch {
-            viewState = .error(error.localizedDescription)
+            // Comment 3: If we already have threads, show inline error banner
+            if !threads.isEmpty {
+                errorBannerMessage = error.localizedDescription
+                viewState = .loaded
+            } else {
+                viewState = .error(error.localizedDescription)
+            }
         }
     }
 
@@ -528,9 +686,8 @@ struct ThreadListView: View {
             paginationCursor = page.nextCursor
             hasMorePages = page.hasMore
         } catch {
-            // Pagination errors don't replace the whole view state
-            // Just stop paginating silently
-            hasMorePages = false
+            // Comment 10: Show inline retry instead of silently stopping
+            paginationError = true
         }
     }
 
@@ -571,6 +728,128 @@ struct ThreadListView: View {
             // TODO: Show UndoToastView (Phase 6 integration)
         } catch {
             // TODO: Show error toast (Phase 6 integration)
+        }
+    }
+
+    // MARK: - Folder Selection (Comment 9: persist category per folder)
+
+    /// Switch to a folder, saving and restoring the selected category.
+    private func selectFolder(_ folder: Folder) {
+        // Save current category for the current folder
+        if let currentFolder = selectedFolder {
+            categoryPerFolder[currentFolder.id] = selectedCategory
+        }
+        selectedFolder = folder
+        // Restore category for the new folder (or nil if none saved)
+        if let saved = categoryPerFolder[folder.id] {
+            selectedCategory = saved
+        } else {
+            selectedCategory = nil
+        }
+        // Load outbox if needed, otherwise reload threads
+        if isOutboxSelected {
+            Task { await loadOutboxEmails() }
+        } else {
+            Task { await reloadThreads() }
+        }
+    }
+
+    // MARK: - Outbox Loading (Comment 6)
+
+    /// Load outbox emails for the current account.
+    private func loadOutboxEmails() async {
+        do {
+            outboxEmails = try await fetchThreads.fetchOutboxEmails(accountId: selectedAccount?.id)
+            viewState = outboxEmails.isEmpty ? .empty : .loaded
+        } catch {
+            viewState = .error(error.localizedDescription)
+        }
+    }
+
+    // MARK: - Multi-Select (Comment 7)
+
+    /// Toggle selection of a thread in multi-select mode.
+    private func toggleThreadSelection(_ threadId: String) {
+        if selectedThreadIds.contains(threadId) {
+            selectedThreadIds.remove(threadId)
+        } else {
+            selectedThreadIds.insert(threadId)
+        }
+    }
+
+    // MARK: - Batch Actions (Comment 7)
+
+    private func batchArchive() async {
+        let ids = Array(selectedThreadIds)
+        do {
+            try await manageThreadActions.archiveThreads(ids: ids)
+            threads.removeAll { ids.contains($0.id) }
+            exitMultiSelectMode()
+        } catch {
+            // TODO: Show error toast
+        }
+    }
+
+    private func batchDelete() async {
+        let ids = Array(selectedThreadIds)
+        do {
+            try await manageThreadActions.deleteThreads(ids: ids)
+            threads.removeAll { ids.contains($0.id) }
+            exitMultiSelectMode()
+        } catch {
+            // TODO: Show error toast
+        }
+    }
+
+    private func batchMarkRead() async {
+        let ids = Array(selectedThreadIds)
+        do {
+            try await manageThreadActions.markThreadsRead(ids: ids)
+            exitMultiSelectMode()
+            await reloadThreads()
+        } catch {
+            // TODO: Show error toast
+        }
+    }
+
+    private func batchMarkUnread() async {
+        let ids = Array(selectedThreadIds)
+        do {
+            try await manageThreadActions.markThreadsUnread(ids: ids)
+            exitMultiSelectMode()
+            await reloadThreads()
+        } catch {
+            // TODO: Show error toast
+        }
+    }
+
+    private func batchStar() async {
+        let ids = Array(selectedThreadIds)
+        do {
+            try await manageThreadActions.starThreads(ids: ids)
+            exitMultiSelectMode()
+            await reloadThreads()
+        } catch {
+            // TODO: Show error toast
+        }
+    }
+
+    private func batchMove(toFolderId: String) async {
+        let ids = Array(selectedThreadIds)
+        do {
+            try await manageThreadActions.moveThreads(ids: ids, toFolderId: toFolderId)
+            threads.removeAll { ids.contains($0.id) }
+            exitMultiSelectMode()
+        } catch {
+            // TODO: Show error toast
+        }
+    }
+
+    private func exitMultiSelectMode() {
+        isMultiSelectMode = false
+        selectedThreadIds.removeAll()
+        if threads.isEmpty {
+            viewState = selectedCategory != nil ? .emptyFiltered : .empty
         }
     }
 

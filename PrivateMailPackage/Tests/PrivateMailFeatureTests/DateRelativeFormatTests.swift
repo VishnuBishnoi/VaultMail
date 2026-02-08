@@ -110,7 +110,7 @@ struct DateRelativeFormatTests {
         components.minute = 0
         let date = Calendar.current.date(from: components)!
         let result = date.relativeThreadFormat(relativeTo: now)
-        #expect(result == "2/5/25")
+        #expect(result == "Feb 5, 2025")
     }
 
     @Test("Midnight edge case still shows today format")
@@ -139,7 +139,7 @@ struct DateRelativeFormatTests {
         components.minute = 59
         let date = Calendar.current.date(from: components)!
         let result = date.relativeThreadFormat(relativeTo: now)
-        #expect(result == "12/31/25")
+        #expect(result == "Dec 31, 2025")
     }
 
     @Test("Jan 1 this year shows month day")
@@ -154,5 +154,35 @@ struct DateRelativeFormatTests {
         let date = Calendar.current.date(from: components)!
         let result = date.relativeThreadFormat(relativeTo: now)
         #expect(result == "Jan 1")
+    }
+
+    @Test("7 days ago shows month and day, not weekday")
+    func sevenDaysAgoShowsMonthDay() {
+        // Feb 1, 2026 = 7 days before Feb 8
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 2
+        components.day = 1
+        components.hour = 12
+        components.minute = 0
+        let date = Calendar.current.date(from: components)!
+        let result = date.relativeThreadFormat(relativeTo: now)
+        #expect(result == "Feb 1")
+    }
+
+    @Test("Future date in same year falls into weekday branch")
+    func futureDateThisYear() {
+        // Note: The current implementation treats future dates that are >= sixDaysAgo
+        // as "this week", showing the abbreviated weekday. Mar 15, 2026 is a Sunday.
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 3
+        components.day = 15
+        components.hour = 10
+        components.minute = 0
+        let date = Calendar.current.date(from: components)!
+        let result = date.relativeThreadFormat(relativeTo: now)
+        // Future dates >= sixDaysAgo currently fall into the weekday branch
+        #expect(result == "Sun")
     }
 }
