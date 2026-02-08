@@ -13,6 +13,8 @@ final class MockEmailRepository: EmailRepositoryProtocol {
     var emails: [Email] = []
     var threads: [PrivateMailFeature.Thread] = []
     var emailFolders: [EmailFolder] = []
+    var contactCacheEntries: [ContactCacheEntry] = []
+    var mockContactQueryResults: [ContactCacheEntry] = []
 
     // MARK: - Call Counters
 
@@ -125,6 +127,8 @@ final class MockEmailRepository: EmailRepositoryProtocol {
     var getEmailsByAccountCallCount = 0
     var saveEmailFolderCallCount = 0
     var saveAttachmentCallCount = 0
+    var queryContactCacheCallCount = 0
+    var upsertContactCacheCallCount = 0
 
     func getEmailByMessageId(_ messageId: String, accountId: String) async throws -> Email? {
         getEmailByMessageIdCallCount += 1
@@ -153,6 +157,55 @@ final class MockEmailRepository: EmailRepositoryProtocol {
     func saveAttachment(_ attachment: Attachment) async throws {
         saveAttachmentCallCount += 1
         if let error = errorToThrow { throw error }
+    }
+
+    func queryContactCache(prefix: String, limit: Int) async throws -> [ContactCacheEntry] {
+        queryContactCacheCallCount += 1
+        if let error = errorToThrow { throw error }
+
+        if !mockContactQueryResults.isEmpty {
+            return Array(mockContactQueryResults.prefix(limit))
+        }
+
+        let normalized = prefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return contactCacheEntries
+            .filter {
+                $0.emailAddress.localizedStandardContains(normalized)
+                    || ($0.displayName?.localizedStandardContains(normalized) ?? false)
+            }
+            .sorted {
+                if $0.frequency != $1.frequency { return $0.frequency > $1.frequency }
+                if $0.lastSeenDate != $1.lastSeenDate { return $0.lastSeenDate > $1.lastSeenDate }
+                return $0.emailAddress < $1.emailAddress
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    func upsertContactCache(entries: [ContactCacheUpsert]) async throws {
+        upsertContactCacheCallCount += 1
+        if let error = errorToThrow { throw error }
+
+        for entry in entries {
+            let key = "\(entry.accountId)::\(entry.emailAddress.lowercased())"
+            if let idx = contactCacheEntries.firstIndex(where: { $0.id == key }) {
+                let existing = contactCacheEntries[idx]
+                existing.frequency += 1
+                existing.lastSeenDate = max(existing.lastSeenDate, entry.seenAt)
+                if let name = entry.displayName, !name.isEmpty {
+                    existing.displayName = name
+                }
+            } else {
+                let cacheEntry = ContactCacheEntry(
+                    accountId: entry.accountId,
+                    emailAddress: entry.emailAddress,
+                    displayName: entry.displayName,
+                    lastSeenDate: entry.seenAt,
+                    frequency: 1
+                )
+                contactCacheEntries.append(cacheEntry)
+            }
+        }
     }
 
     // MARK: - Thread List Queries

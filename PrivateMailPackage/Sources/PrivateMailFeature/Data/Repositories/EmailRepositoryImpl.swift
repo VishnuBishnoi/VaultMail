@@ -606,4 +606,86 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
         }
         try context.save()
     }
+
+    // MARK: - Composer Contact Cache
+
+    public func queryContactCache(prefix: String, limit: Int) async throws -> [ContactCacheEntry] {
+        let descriptor = FetchDescriptor<ContactCacheEntry>()
+        let allEntries = try context.fetch(descriptor)
+        let normalized = prefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        guard !normalized.isEmpty else { return [] }
+
+        let filtered = allEntries.filter {
+            $0.emailAddress.localizedStandardContains(normalized)
+                || ($0.displayName?.localizedStandardContains(normalized) ?? false)
+        }
+
+        let sorted = filtered.sorted {
+            if $0.frequency != $1.frequency { return $0.frequency > $1.frequency }
+            if $0.lastSeenDate != $1.lastSeenDate { return $0.lastSeenDate > $1.lastSeenDate }
+            return $0.emailAddress < $1.emailAddress
+        }
+
+        return Array(sorted.prefix(limit))
+    }
+
+    public func upsertContactCache(entries: [ContactCacheUpsert]) async throws {
+        guard !entries.isEmpty else { return }
+
+        let descriptor = FetchDescriptor<ContactCacheEntry>()
+        let allEntries = try context.fetch(descriptor)
+        var indexById: [String: ContactCacheEntry] = [:]
+        indexById.reserveCapacity(allEntries.count)
+        for entry in allEntries {
+            indexById[entry.id] = entry
+        }
+
+        var touchedAccounts = Set<String>()
+
+        for entry in entries {
+            let normalizedEmail = entry.emailAddress.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalizedEmail.isEmpty else { continue }
+
+            touchedAccounts.insert(entry.accountId)
+            let key = "\(entry.accountId)::\(normalizedEmail)"
+            if let existing = indexById[key] {
+                existing.frequency += 1
+                existing.lastSeenDate = max(existing.lastSeenDate, entry.seenAt)
+                if let displayName = entry.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !displayName.isEmpty {
+                    existing.displayName = displayName
+                }
+            } else {
+                let created = ContactCacheEntry(
+                    accountId: entry.accountId,
+                    emailAddress: normalizedEmail,
+                    displayName: entry.displayName,
+                    lastSeenDate: entry.seenAt,
+                    frequency: 1
+                )
+                context.insert(created)
+                indexById[key] = created
+            }
+        }
+
+        // Soft cap per account: keep top 10k by frequency, then recency.
+        let accountLimit = 10_000
+        for accountId in touchedAccounts {
+            let accountEntries = indexById.values.filter { $0.accountId == accountId }
+            guard accountEntries.count > accountLimit else { continue }
+
+            let sorted = accountEntries.sorted {
+                if $0.frequency != $1.frequency { return $0.frequency > $1.frequency }
+                if $0.lastSeenDate != $1.lastSeenDate { return $0.lastSeenDate > $1.lastSeenDate }
+                return $0.emailAddress < $1.emailAddress
+            }
+
+            for stale in sorted.dropFirst(accountLimit) {
+                context.delete(stale)
+            }
+        }
+
+        try context.save()
+    }
 }

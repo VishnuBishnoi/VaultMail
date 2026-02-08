@@ -5,8 +5,7 @@ import SwiftData
 ///
 /// Provides both production (persistent) and in-memory (testing) variants.
 ///
-/// Schema includes all 7 entities from Foundation spec Section 5.1:
-/// Account, Folder, Email, Thread, EmailFolder, Attachment, SearchIndex
+/// Schema includes Foundation entities plus feature-local contact cache.
 public enum ModelContainerFactory {
 
     /// All model types in the schema.
@@ -17,7 +16,8 @@ public enum ModelContainerFactory {
         Thread.self,
         EmailFolder.self,
         Attachment.self,
-        SearchIndex.self
+        SearchIndex.self,
+        ContactCacheEntry.self
     ]
 
     /// Creates a production ModelContainer with persistent storage.

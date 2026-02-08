@@ -34,6 +34,11 @@ public final class Account {
     @Relationship(deleteRule: .cascade, inverse: \Folder.account)
     public var folders: [Folder]
 
+    /// Local contact cache entries used by composer autocomplete.
+    /// Cascade: deleting an Account deletes its cached contacts.
+    @Relationship(deleteRule: .cascade, inverse: \ContactCacheEntry.account)
+    public var contactCacheEntries: [ContactCacheEntry]
+
     public init(
         id: String = UUID().uuidString,
         email: String,
@@ -59,5 +64,6 @@ public final class Account {
         self.isActive = isActive
         self.syncWindowDays = syncWindowDays
         self.folders = []
+        self.contactCacheEntries = []
     }
 }

@@ -330,6 +330,7 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
         // Fetch in batches
         var allNewEmails: [Email] = []
         var mutableLookup = emailLookup
+        var contactUpserts: [ContactCacheUpsert] = []
 
         for batchStart in stride(from: 0, to: newUIDs.count, by: fetchBatchSize) {
             let batchEnd = min(batchStart + fetchBatchSize, newUIDs.count)
@@ -357,6 +358,7 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
                     threadId: threadId
                 )
                 try await emailRepository.saveEmail(email)
+                contactUpserts.append(contentsOf: makeContactCacheUpserts(header: header, accountId: account.id))
 
                 // Create EmailFolder join
                 let ef = EmailFolder(imapUID: Int(header.uid))
@@ -376,6 +378,10 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
                 mutableLookup[email.messageId] = email
                 allNewEmails.append(email)
             }
+        }
+
+        if !contactUpserts.isEmpty {
+            try await emailRepository.upsertContactCache(entries: contactUpserts)
         }
 
         // Update thread aggregates for all affected threads
@@ -628,5 +634,50 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
             return "[]"
         }
         return string
+    }
+
+    private func makeContactCacheUpserts(header: IMAPEmailHeader, accountId: String) -> [ContactCacheUpsert] {
+        var entries: [ContactCacheUpsert] = []
+        let seenAt = header.date ?? Date()
+
+        let (fromEmail, fromName) = parseFromField(header.from)
+        if !fromEmail.isEmpty {
+            entries.append(
+                ContactCacheUpsert(
+                    accountId: accountId,
+                    emailAddress: fromEmail,
+                    displayName: fromName,
+                    seenAt: seenAt
+                )
+            )
+        }
+
+        for toAddress in header.to {
+            let (email, name) = parseFromField(toAddress)
+            guard !email.isEmpty else { continue }
+            entries.append(
+                ContactCacheUpsert(
+                    accountId: accountId,
+                    emailAddress: email,
+                    displayName: name,
+                    seenAt: seenAt
+                )
+            )
+        }
+
+        for ccAddress in header.cc {
+            let (email, name) = parseFromField(ccAddress)
+            guard !email.isEmpty else { continue }
+            entries.append(
+                ContactCacheUpsert(
+                    accountId: accountId,
+                    emailAddress: email,
+                    displayName: name,
+                    seenAt: seenAt
+                )
+            )
+        }
+
+        return entries
     }
 }

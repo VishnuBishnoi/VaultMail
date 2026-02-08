@@ -6,18 +6,18 @@ import SwiftData
 @Suite("ModelContainer")
 struct ModelContainerTests {
 
-    @Test("In-memory container initializes with all 7 model types")
+    @Test("In-memory container initializes with all model types")
     func inMemoryContainerCreation() throws {
         let container = try ModelContainerFactory.createForTesting()
         // If we get here without throwing, the schema is valid
-        #expect(container.schema.entities.count >= 7)
+        #expect(container.schema.entities.count >= 8)
     }
 
     @Test("Container schema includes all required entities")
     func schemaContainsAllEntities() throws {
         let container = try ModelContainerFactory.createForTesting()
         let entityNames = container.schema.entities.map { $0.name }
-        let requiredEntities = ["Account", "Folder", "Email", "Thread", "EmailFolder", "Attachment", "SearchIndex"]
+        let requiredEntities = ["Account", "Folder", "Email", "Thread", "EmailFolder", "Attachment", "SearchIndex", "ContactCacheEntry"]
         for name in requiredEntities {
             #expect(entityNames.contains(name), "Schema missing entity: \(name)")
         }

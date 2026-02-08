@@ -1,5 +1,19 @@
 import Foundation
 
+public struct ContactCacheUpsert: Sendable {
+    public let accountId: String
+    public let emailAddress: String
+    public let displayName: String?
+    public let seenAt: Date
+
+    public init(accountId: String, emailAddress: String, displayName: String?, seenAt: Date) {
+        self.accountId = accountId
+        self.emailAddress = emailAddress
+        self.displayName = displayName
+        self.seenAt = seenAt
+    }
+}
+
 /// Repository protocol for email, thread, and folder operations.
 ///
 /// Isolated to `@MainActor` because SwiftData `@Model` types are not
@@ -56,6 +70,14 @@ public protocol EmailRepositoryProtocol {
 
     /// Save an Attachment.
     func saveAttachment(_ attachment: Attachment) async throws
+
+    // MARK: - Composer Contact Cache
+
+    /// Query cached contacts for autocomplete suggestions.
+    func queryContactCache(prefix: String, limit: Int) async throws -> [ContactCacheEntry]
+
+    /// Upsert cached contacts from synced email headers.
+    func upsertContactCache(entries: [ContactCacheUpsert]) async throws
 
     // MARK: - Thread List Queries (FR-TL-01, FR-TL-02)
 

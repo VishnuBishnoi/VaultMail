@@ -61,6 +61,30 @@ struct CascadeDeleteTests {
         #expect(folders.isEmpty, "Folders should be deleted when Account is deleted")
     }
 
+    @Test("Deleting Account cascades to ContactCacheEntry")
+    func accountDeleteCascadesContactCache() throws {
+        let context = try makeContext()
+        let account = Account(email: "contact-cache@test.com", displayName: "Cache")
+        context.insert(account)
+
+        let contact = ContactCacheEntry(
+            accountId: account.id,
+            emailAddress: "alice@example.com",
+            displayName: "Alice",
+            lastSeenDate: .now,
+            frequency: 3
+        )
+        contact.account = account
+        context.insert(contact)
+        try context.save()
+
+        context.delete(account)
+        try context.save()
+
+        let remaining = try context.fetch(FetchDescriptor<ContactCacheEntry>())
+        #expect(remaining.isEmpty, "Contact cache entries should be deleted when Account is deleted")
+    }
+
     @Test("Deleting Account cascades through Folder to EmailFolder")
     func accountDeleteCascadesEmailFolders() throws {
         let context = try makeContext()

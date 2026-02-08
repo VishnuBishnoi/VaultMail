@@ -241,6 +241,10 @@ struct SyncEmailsUseCaseTests {
         #expect(emailRepo.saveEmailFolderCallCount == 2)
         // At least one thread should have been saved
         #expect(emailRepo.saveThreadCallCount >= 1)
+        // Contact cache should be updated from From/To/CC headers
+        #expect(emailRepo.upsertContactCacheCallCount == 1)
+        #expect(emailRepo.contactCacheEntries.contains(where: { $0.emailAddress == "alice@example.com" }))
+        #expect(emailRepo.contactCacheEntries.contains(where: { $0.emailAddress == "bob@example.com" }))
     }
 
     @Test("syncAccount filters out already-synced UIDs")
