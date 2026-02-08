@@ -152,7 +152,7 @@ struct ThreadListView: View {
             #endif
             .toolbar { toolbarContent }
             .sheet(isPresented: $showComposer) {
-                ComposerView(mode: .new, fromAccount: selectedAccount?.email)
+                ComposerView(mode: .new, fromAccountId: selectedAccount?.id, fromAccount: selectedAccount?.email)
             }
             .sheet(isPresented: $showAccountSwitcher) {
                 AccountSwitcherSheet(

@@ -1,9 +1,12 @@
 import SwiftUI
+import SwiftData
 
 struct ComposerView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
 
     let mode: ComposerMode
+    let fromAccountId: String?
     let fromAccount: String?
     let initialSmartReplies: [String]
 
@@ -20,11 +23,21 @@ struct ComposerView: View {
     @State private var pendingPromptQueue: [ComposerSendPrompt] = []
     @State private var activePrompt: ComposerSendPrompt?
     @State private var smartReplies: [String] = []
+    @State private var inReplyTo: String?
+    @State private var references: String?
+    @State private var isSending = false
+    @State private var sendErrorMessage: String?
 
     @State private var initialLoaded = false
 
-    init(mode: ComposerMode = .new, fromAccount: String? = nil, initialSmartReplies: [String] = []) {
+    init(
+        mode: ComposerMode = .new,
+        fromAccountId: String? = nil,
+        fromAccount: String? = nil,
+        initialSmartReplies: [String] = []
+    ) {
         self.mode = mode
+        self.fromAccountId = fromAccountId
         self.fromAccount = fromAccount
         self.initialSmartReplies = initialSmartReplies
     }
@@ -47,7 +60,7 @@ struct ComposerView: View {
     }
 
     private var canTapSend: Bool {
-        sendValidation.canSend && forwardAttachmentReadiness.canSend
+        sendValidation.canSend && forwardAttachmentReadiness.canSend && !isSending
     }
 
     private var invalidAddressSet: Set<String> {
@@ -136,6 +149,18 @@ struct ComposerView: View {
                 Button("Send") { proceedPromptQueue() }
                 Button("Cancel", role: .cancel) { pendingPromptQueue.removeAll() }
             }
+            .alert(
+                "Couldn't send message",
+                isPresented: Binding(
+                    get: { sendErrorMessage != nil },
+                    set: { if !$0 { sendErrorMessage = nil } }
+                )
+            ) {
+                Button("Retry") { attemptSend() }
+                Button("OK", role: .cancel) { sendErrorMessage = nil }
+            } message: {
+                Text(sendErrorMessage ?? "Tap retry.")
+            }
             .task {
                 guard !initialLoaded else { return }
                 initialLoaded = true
@@ -209,6 +234,8 @@ struct ComposerView: View {
         subject = prefill.subject
         bodyText = prefill.body
         attachments = prefill.attachments
+        inReplyTo = prefill.inReplyTo
+        references = prefill.references
         showCC = !ccAddresses.isEmpty
         showBCC = !bccAddresses.isEmpty
     }
@@ -225,7 +252,7 @@ struct ComposerView: View {
         guard canTapSend else { return }
         let prompts = ComposerSendPromptPolicy.requiredPrompts(subject: subject, body: bodyText)
         if prompts.isEmpty {
-            dismiss()
+            Task { await performSend() }
             return
         }
 
@@ -236,13 +263,13 @@ struct ComposerView: View {
     private func proceedPromptQueue() {
         guard !pendingPromptQueue.isEmpty else {
             activePrompt = nil
-            dismiss()
+            Task { await performSend() }
             return
         }
         pendingPromptQueue.removeFirst()
         activePrompt = pendingPromptQueue.first
         if activePrompt == nil {
-            dismiss()
+            Task { await performSend() }
         }
     }
 
@@ -254,10 +281,51 @@ struct ComposerView: View {
             smartReplies = []
         }
     }
+
+    @MainActor
+    private func performSend() async {
+        let accountId = fromAccountId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let fromAddress = fromAccount?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !accountId.isEmpty, !fromAddress.isEmpty else {
+            sendErrorMessage = "Missing sender account. Select an account and retry."
+            return
+        }
+
+        isSending = true
+        defer { isSending = false }
+
+        let request = SendEmailRequest(
+            accountId: accountId,
+            fromAddress: fromAddress,
+            to: normalizedAddresses(toAddresses),
+            cc: normalizedAddresses(ccAddresses),
+            bcc: normalizedAddresses(bccAddresses),
+            subject: subject,
+            bodyText: bodyText,
+            inReplyTo: inReplyTo,
+            references: references,
+            attachments: attachments
+        )
+
+        do {
+            let repository = EmailRepositoryImpl(modelContainer: modelContext.container)
+            let sendUseCase = SendEmailUseCase(repository: repository)
+            _ = try await sendUseCase.execute(request)
+            dismiss()
+        } catch {
+            sendErrorMessage = error.localizedDescription.isEmpty ? "Tap retry." : error.localizedDescription
+        }
+    }
+
+    private func normalizedAddresses(_ values: [String]) -> [String] {
+        values
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
 }
 
 #Preview("New") {
-    ComposerView(mode: .new, fromAccount: "me@example.com")
+    ComposerView(mode: .new, fromAccountId: "acc-1", fromAccount: "me@example.com")
 }
 
 #Preview("Reply") {
@@ -275,6 +343,7 @@ struct ComposerView: View {
                 references: "<root>"
             )
         ),
+        fromAccountId: "acc-1",
         fromAccount: "me@example.com"
     )
 }
