@@ -576,12 +576,16 @@ struct ThreadListView: View {
 
     // MARK: - Data Loading
 
-    /// Initial load on view appear: sync from IMAP, then load from SwiftData.
+    /// Initial load on view appear: show cached data instantly, then sync in background.
+    ///
+    /// Two-phase approach avoids blocking the UI while IMAP sync completes:
+    /// 1. Load accounts, folders, and cached threads from SwiftData (instant).
+    /// 2. Fire IMAP sync in the background; reload on completion.
     private func initialLoad() async {
         viewState = .loading
 
         do {
-            // Load accounts
+            // Phase 1: Load cached data from SwiftData (instant)
             accounts = try await manageAccounts.getAccounts()
 
             guard let firstAccount = accounts.first else {
@@ -589,16 +593,7 @@ struct ThreadListView: View {
                 return
             }
 
-            // Default to first account
             selectedAccount = firstAccount
-
-            // Sync from IMAP before loading from SwiftData.
-            // Non-fatal: on sync error, show banner and fall through to cached data.
-            do {
-                try await syncEmails.syncAccount(accountId: firstAccount.id)
-            } catch {
-                errorBannerMessage = "Sync failed: \(error.localizedDescription)"
-            }
 
             // Load folders for the selected account
             folders = try await fetchThreads.fetchFolders(accountId: firstAccount.id)
@@ -607,8 +602,28 @@ struct ThreadListView: View {
             let inboxType = FolderType.inbox.rawValue
             selectedFolder = folders.first(where: { $0.folderType == inboxType }) ?? folders.first
 
-            // Load threads and unread counts
+            // Show cached threads immediately (may be empty on first launch)
             await loadThreadsAndCounts()
+
+            // Phase 2: Sync from IMAP in the background, then refresh the view
+            NSLog("[UI] Starting background sync for account: \(firstAccount.id)")
+            Task {
+                do {
+                    try await syncEmails.syncAccount(accountId: firstAccount.id)
+                    NSLog("[UI] Background sync succeeded, reloading threads...")
+                    // Sync succeeded — reload folders and threads with fresh data
+                    folders = try await fetchThreads.fetchFolders(accountId: firstAccount.id)
+                    if selectedFolder == nil {
+                        let inboxType = FolderType.inbox.rawValue
+                        selectedFolder = folders.first(where: { $0.folderType == inboxType }) ?? folders.first
+                    }
+                    await loadThreadsAndCounts()
+                    NSLog("[UI] Threads reloaded, count: \(threads.count)")
+                } catch {
+                    NSLog("[UI] Background sync FAILED: \(error)")
+                    errorBannerMessage = "Sync failed: \(error.localizedDescription)"
+                }
+            }
         } catch {
             viewState = .error(error.localizedDescription)
         }

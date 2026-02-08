@@ -82,9 +82,15 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
     // MARK: - Public API
 
     public func syncAccount(accountId: String) async throws {
+        NSLog("[Sync] syncAccount started for \(accountId)")
         let account = try await findAccount(id: accountId)
-        let token = try await getAccessToken(for: account)
+        NSLog("[Sync] Found account: \(account.email), host: \(account.imapHost):\(account.imapPort)")
 
+        NSLog("[Sync] Getting access token...")
+        let token = try await getAccessToken(for: account)
+        NSLog("[Sync] Got access token (length: \(token.count))")
+
+        NSLog("[Sync] Checking out IMAP connection...")
         let client = try await connectionProvider.checkoutConnection(
             accountId: account.id,
             host: account.imapHost,
@@ -92,28 +98,33 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
             email: account.email,
             accessToken: token
         )
+        NSLog("[Sync] IMAP connection established")
 
         do {
             // 1. Sync folders
+            NSLog("[Sync] Listing IMAP folders...")
             let imapFolders = try await client.listFolders()
+            NSLog("[Sync] Found \(imapFolders.count) IMAP folders")
             let syncableFolders = try await syncFolders(
                 imapFolders: imapFolders,
                 account: account
             )
+            NSLog("[Sync] \(syncableFolders.count) syncable folders")
 
             // 2. Sync emails for each folder
-            // Pre-load existing emails for thread resolution
             let existingEmails = try await emailRepository.getEmailsByAccount(accountId: account.id)
             var emailLookup = buildMessageIdLookup(from: existingEmails)
+            NSLog("[Sync] Existing emails in DB: \(existingEmails.count)")
 
             for folder in syncableFolders {
+                NSLog("[Sync] Syncing folder: \(folder.name) (\(folder.imapPath))")
                 let newEmails = try await syncFolderEmails(
                     client: client,
                     account: account,
                     folder: folder,
                     emailLookup: emailLookup
                 )
-                // Update lookup with newly synced emails for cross-folder threading
+                NSLog("[Sync] Synced \(newEmails.count) new emails from \(folder.name)")
                 for email in newEmails {
                     emailLookup[email.messageId] = email
                 }
@@ -122,9 +133,11 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
             // 3. Update account sync date
             account.lastSyncDate = Date()
             try await accountRepository.updateAccount(account)
+            NSLog("[Sync] syncAccount completed successfully")
 
             await connectionProvider.checkinConnection(client, accountId: account.id)
         } catch {
+            NSLog("[Sync] syncAccount ERROR: \(error)")
             await connectionProvider.checkinConnection(client, accountId: account.id)
             throw error
         }
@@ -181,13 +194,20 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
     private func getAccessToken(for account: Account) async throws -> String {
         // Try to refresh the token (handles expiry checks internally)
         do {
+            NSLog("[Sync] Refreshing token for account \(account.id)...")
             let token = try await accountRepository.refreshToken(for: account.id)
+            NSLog("[Sync] Token refreshed successfully, expires: \(token.expiresAt)")
             return token.accessToken
         } catch {
+            NSLog("[Sync] Token refresh failed: \(error), trying existing token...")
             // If refresh fails, try using existing token from keychain
-            if let existing = try await keychainManager.retrieve(for: account.id),
-               !existing.isExpired {
-                return existing.accessToken
+            if let existing = try await keychainManager.retrieve(for: account.id) {
+                NSLog("[Sync] Found existing token, expired: \(existing.isExpired), expires: \(existing.expiresAt)")
+                if !existing.isExpired {
+                    return existing.accessToken
+                }
+            } else {
+                NSLog("[Sync] No token found in keychain")
             }
             throw SyncError.tokenRefreshFailed(error.localizedDescription)
         }

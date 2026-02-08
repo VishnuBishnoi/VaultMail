@@ -36,7 +36,7 @@ struct EmailRepositoryImplTests {
     private func insertTestData(
         container: ModelContainer
     ) throws -> TestData {
-        let context = ModelContext(container)
+        let context = container.mainContext
 
         let account = Account(
             id: "acc-1",
@@ -248,7 +248,7 @@ struct EmailRepositoryImplTests {
     @MainActor
     func getThreadsEmptyFolder() async throws {
         let container = try makeContainer()
-        let context = ModelContext(container)
+        let context = container.mainContext
 
         let account = Account(id: "acc-empty", email: "empty@test.com", displayName: "Empty")
         context.insert(account)
@@ -351,7 +351,7 @@ struct EmailRepositoryImplTests {
     @MainActor
     func getThreadsUnified() async throws {
         let container = try makeContainer()
-        let context = ModelContext(container)
+        let context = container.mainContext
 
         let now = Date()
 
@@ -408,7 +408,7 @@ struct EmailRepositoryImplTests {
     @MainActor
     func getOutboxEmails() async throws {
         let container = try makeContainer()
-        let context = ModelContext(container)
+        let context = container.mainContext
 
         let thread = PrivateMailFeature.Thread(
             id: "outbox-thread",
@@ -817,7 +817,7 @@ struct EmailRepositoryImplTests {
     @MainActor
     func saveFolderInsert() async throws {
         let container = try makeContainer()
-        let context = ModelContext(container)
+        let context = container.mainContext
 
         let account = Account(id: "acc-save", email: "save@test.com", displayName: "Save")
         context.insert(account)
@@ -828,7 +828,7 @@ struct EmailRepositoryImplTests {
         let folder = Folder(id: "folder-new", name: "Drafts", imapPath: "[Gmail]/Drafts")
         try await repo.saveFolder(folder)
 
-        let verifyContext = ModelContext(container)
+        let verifyContext = container.mainContext
         var desc = FetchDescriptor<Folder>(predicate: #Predicate { $0.id == "folder-new" })
         desc.fetchLimit = 1
         let fetched = try verifyContext.fetch(desc)
@@ -920,7 +920,7 @@ struct EmailRepositoryImplTests {
         )
         try await repo.saveEmail(newEmail)
 
-        let context = ModelContext(container)
+        let context = container.mainContext
         var descriptor = FetchDescriptor<Email>(
             predicate: #Predicate { $0.id == "email-new" }
         )
@@ -950,7 +950,7 @@ struct EmailRepositoryImplTests {
         )
         try await repo.saveEmail(updated)
 
-        let context = ModelContext(container)
+        let context = container.mainContext
         var descriptor = FetchDescriptor<Email>(
             predicate: #Predicate { $0.id == "email-1" }
         )
@@ -972,7 +972,7 @@ struct EmailRepositoryImplTests {
 
         try await repo.deleteEmail(id: data.email1.id)
 
-        let context = ModelContext(container)
+        let context = container.mainContext
         var descriptor = FetchDescriptor<Email>(
             predicate: #Predicate { $0.id == "email-1" }
         )
@@ -1015,7 +1015,7 @@ struct EmailRepositoryImplTests {
     @MainActor
     func outboxEmailsCrossAccount() async throws {
         let container = try makeContainer()
-        let context = ModelContext(container)
+        let context = container.mainContext
 
         // Account 1 thread + email
         let thread1 = PrivateMailFeature.Thread(

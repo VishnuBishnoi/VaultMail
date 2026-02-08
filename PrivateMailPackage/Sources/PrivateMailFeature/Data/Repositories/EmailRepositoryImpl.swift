@@ -12,6 +12,11 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
 
     private let modelContainer: ModelContainer
 
+    /// Single shared context for all operations. Safe because this class is @MainActor.
+    private var context: ModelContext {
+        modelContainer.mainContext
+    }
+
     public init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
     }
@@ -19,7 +24,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     // MARK: - Folders
 
     public func getFolders(accountId: String) async throws -> [Folder] {
-        let context = ModelContext(modelContainer)
+
         let descriptor = FetchDescriptor<Folder>(
             predicate: #Predicate { $0.account?.id == accountId },
             sortBy: [SortDescriptor(\.name)]
@@ -28,7 +33,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func saveFolder(_ folder: Folder) async throws {
-        let context = ModelContext(modelContainer)
+
         let folderId = folder.id
         var descriptor = FetchDescriptor<Folder>(
             predicate: #Predicate { $0.id == folderId }
@@ -50,7 +55,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func deleteFolder(id: String) async throws {
-        let context = ModelContext(modelContainer)
+
         var descriptor = FetchDescriptor<Folder>(
             predicate: #Predicate { $0.id == id }
         )
@@ -67,7 +72,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     // MARK: - Emails
 
     public func getEmails(folderId: String) async throws -> [Email] {
-        let context = ModelContext(modelContainer)
+
         // 2-step: EmailFolder -> Email
         let efDescriptor = FetchDescriptor<EmailFolder>(
             predicate: #Predicate<EmailFolder> { $0.folder?.id == folderId }
@@ -77,7 +82,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func saveEmail(_ email: Email) async throws {
-        let context = ModelContext(modelContainer)
+
         let emailId = email.id
         var descriptor = FetchDescriptor<Email>(
             predicate: #Predicate { $0.id == emailId }
@@ -113,7 +118,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func deleteEmail(id: String) async throws {
-        let context = ModelContext(modelContainer)
+
         var descriptor = FetchDescriptor<Email>(
             predicate: #Predicate { $0.id == id }
         )
@@ -128,7 +133,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     // MARK: - Threads (Basic)
 
     public func getThreads(accountId: String) async throws -> [PrivateMailFeature.Thread] {
-        let context = ModelContext(modelContainer)
+
         let descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
             predicate: #Predicate { $0.accountId == accountId },
             sortBy: [SortDescriptor(\.latestDate, order: .reverse)]
@@ -137,7 +142,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func getThread(id: String) async throws -> PrivateMailFeature.Thread? {
-        let context = ModelContext(modelContainer)
+
         var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
             predicate: #Predicate { $0.id == id }
         )
@@ -146,7 +151,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func saveThread(_ thread: PrivateMailFeature.Thread) async throws {
-        let context = ModelContext(modelContainer)
+
         let threadId = thread.id
         var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
             predicate: #Predicate { $0.id == threadId }
@@ -177,7 +182,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
         cursor: Date?,
         limit: Int
     ) async throws -> [PrivateMailFeature.Thread] {
-        let context = ModelContext(modelContainer)
+
 
         // Step 1: Fetch EmailFolder entries for the given folderId
         let efDescriptor = FetchDescriptor<EmailFolder>(
@@ -230,7 +235,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
         cursor: Date?,
         limit: Int
     ) async throws -> [PrivateMailFeature.Thread] {
-        let context = ModelContext(modelContainer)
+
         let descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
             sortBy: [SortDescriptor(\.latestDate, order: .reverse)]
         )
@@ -253,7 +258,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func getOutboxEmails(accountId: String?) async throws -> [Email] {
-        let context = ModelContext(modelContainer)
+
         let queuedState = SendState.queued.rawValue
         let sendingState = SendState.sending.rawValue
         let failedState = SendState.failed.rawValue
@@ -284,7 +289,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func getUnreadCounts(folderId: String) async throws -> [String?: Int] {
-        let context = ModelContext(modelContainer)
+
 
         // 3-step join: get threads for this folder
         let efDescriptor = FetchDescriptor<EmailFolder>(
@@ -315,7 +320,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func getUnreadCountsUnified() async throws -> [String?: Int] {
-        let context = ModelContext(modelContainer)
+
         let descriptor = FetchDescriptor<PrivateMailFeature.Thread>()
         let allThreads = try context.fetch(descriptor)
 
@@ -330,7 +335,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     // MARK: - Thread Actions (FR-TL-03)
 
     public func archiveThread(id: String) async throws {
-        let context = ModelContext(modelContainer)
+
         var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
             predicate: #Predicate { $0.id == id }
         )
@@ -367,7 +372,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func deleteThread(id: String) async throws {
-        let context = ModelContext(modelContainer)
+
         var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
             predicate: #Predicate { $0.id == id }
         )
@@ -404,7 +409,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func moveThread(id: String, toFolderId: String) async throws {
-        let context = ModelContext(modelContainer)
+
 
         // Find the thread
         var threadDescriptor = FetchDescriptor<PrivateMailFeature.Thread>(
@@ -441,7 +446,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func toggleReadStatus(threadId: String) async throws {
-        let context = ModelContext(modelContainer)
+
         var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
             predicate: #Predicate { $0.id == threadId }
         )
@@ -457,7 +462,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func toggleStarStatus(threadId: String) async throws {
-        let context = ModelContext(modelContainer)
+
         var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
             predicate: #Predicate { $0.id == threadId }
         )
@@ -486,7 +491,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func markThreadsRead(ids: [String]) async throws {
-        let context = ModelContext(modelContainer)
+
         for id in ids {
             var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
                 predicate: #Predicate { $0.id == id }
@@ -501,7 +506,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func markThreadsUnread(ids: [String]) async throws {
-        let context = ModelContext(modelContainer)
+
         for id in ids {
             var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
                 predicate: #Predicate { $0.id == id }
@@ -516,7 +521,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func starThreads(ids: [String]) async throws {
-        let context = ModelContext(modelContainer)
+
         for id in ids {
             var descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
                 predicate: #Predicate { $0.id == id }
@@ -539,7 +544,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     // MARK: - Sync Support (FR-SYNC-01)
 
     public func getEmailByMessageId(_ messageId: String, accountId: String) async throws -> Email? {
-        let context = ModelContext(modelContainer)
+
         var descriptor = FetchDescriptor<Email>(
             predicate: #Predicate { $0.messageId == messageId && $0.accountId == accountId }
         )
@@ -548,7 +553,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func getFolderByImapPath(_ imapPath: String, accountId: String) async throws -> Folder? {
-        let context = ModelContext(modelContainer)
+
         var descriptor = FetchDescriptor<Folder>(
             predicate: #Predicate { $0.imapPath == imapPath && $0.account?.id == accountId }
         )
@@ -557,7 +562,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func getEmailsByAccount(accountId: String) async throws -> [Email] {
-        let context = ModelContext(modelContainer)
+
         let descriptor = FetchDescriptor<Email>(
             predicate: #Predicate { $0.accountId == accountId }
         )
@@ -565,7 +570,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func saveEmailFolder(_ emailFolder: EmailFolder) async throws {
-        let context = ModelContext(modelContainer)
+
         let efId = emailFolder.id
         var descriptor = FetchDescriptor<EmailFolder>(
             predicate: #Predicate { $0.id == efId }
@@ -583,7 +588,7 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
     }
 
     public func saveAttachment(_ attachment: Attachment) async throws {
-        let context = ModelContext(modelContainer)
+
         let attId = attachment.id
         var descriptor = FetchDescriptor<Attachment>(
             predicate: #Predicate { $0.id == attId }
