@@ -23,6 +23,7 @@ struct MessageBubbleView: View {
     let onStarToggle: () -> Void
     let onPreviewAttachment: (Attachment) -> Void
     let onShareAttachment: (URL) -> Void
+    let onAlwaysLoadImages: () -> Void
     let downloadUseCase: DownloadAttachmentUseCaseProtocol
 
     // MARK: - Local State
@@ -35,6 +36,11 @@ struct MessageBubbleView: View {
     @State private var hasBlockedRemoteContent = false
     @State private var remoteImageCount = 0
     @State private var htmlContentHeight: CGFloat = 100
+
+    // MARK: - Environment
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     // MARK: - Body
 
@@ -58,6 +64,10 @@ struct MessageBubbleView: View {
         .accessibilityAction(named: "Star") {
             onStarToggle()
         }
+        .accessibilityAction(named: "Reply") {
+            // TODO: Navigate to composer — wired when Email Composer feature is built
+        }
+        .accessibilityIdentifier("message-bubble-\(email.id)")
     }
 
     // MARK: - Collapsed
@@ -135,7 +145,7 @@ struct MessageBubbleView: View {
             }
         }
         .padding(.bottom, 12)
-        .task(id: "\(email.id)-\(loadRemoteImages)") {
+        .task(id: "\(email.id)-\(loadRemoteImages)-\(showQuotedText)-\(dynamicTypeSize)") {
             await processEmailBody()
         }
     }
@@ -164,6 +174,12 @@ struct MessageBubbleView: View {
         #else
         if let plainText = email.bodyPlain, !plainText.isEmpty {
             Text(plainText)
+                .font(.body)
+                .textSelection(.enabled)
+        } else if let html = processedHTML, !html.isEmpty {
+            // macOS fallback: strip HTML tags to show as plain text (M5 fix).
+            // A native macOS WKWebView renderer can be added in a future iteration.
+            Text(Self.stripHTMLTags(from: html))
                 .font(.body)
                 .textSelection(.enabled)
         } else {
@@ -203,7 +219,7 @@ struct MessageBubbleView: View {
 
             if !isTrustedSender {
                 Button("Always Load") {
-                    // Parent handles trust action — for now just load
+                    onAlwaysLoadImages()
                     loadRemoteImages = true
                 }
                 .font(.caption)
@@ -237,7 +253,8 @@ struct MessageBubbleView: View {
 
     private var quotedTextButton: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.25)) {
+            let animation: Animation? = reduceMotion ? nil : .easeInOut(duration: 0.25)
+            withAnimation(animation) {
                 showQuotedText = true
             }
         } label: {
@@ -355,6 +372,40 @@ struct MessageBubbleView: View {
         return colors[hash % colors.count]
     }
 
+    /// Strip HTML tags to produce a plain-text fallback (used on macOS where
+    /// WKWebView is not yet wired). Replaces block-level closing tags with
+    /// newlines so the output preserves paragraph structure.
+    static func stripHTMLTags(from html: String) -> String {
+        var result = html
+        // Replace <br>, </p>, </div>, </li> with newlines for readability
+        result = result.replacingOccurrences(
+            of: "<br\\s*/?>|</p>|</div>|</li>",
+            with: "\n",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        // Strip remaining tags
+        result = result.replacingOccurrences(
+            of: "<[^>]+>",
+            with: "",
+            options: .regularExpression
+        )
+        // Decode common HTML entities
+        result = result
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+        // Collapse multiple blank lines
+        result = result.replacingOccurrences(
+            of: "\n{3,}",
+            with: "\n\n",
+            options: .regularExpression
+        )
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var accessibilityDescription: String {
         let status = email.isRead ? "Read" : "Unread"
         let star = email.isStarred ? ", Starred" : ""
@@ -401,6 +452,7 @@ private final class PreviewBubbleDownloadUseCase: DownloadAttachmentUseCaseProto
         onStarToggle: {},
         onPreviewAttachment: { _ in },
         onShareAttachment: { _ in },
+        onAlwaysLoadImages: {},
         downloadUseCase: PreviewBubbleDownloadUseCase()
     )
     .padding()
@@ -432,6 +484,7 @@ private final class PreviewBubbleDownloadUseCase: DownloadAttachmentUseCaseProto
             onStarToggle: {},
             onPreviewAttachment: { _ in },
             onShareAttachment: { _ in },
+            onAlwaysLoadImages: {},
             downloadUseCase: PreviewBubbleDownloadUseCase()
         )
         .padding()

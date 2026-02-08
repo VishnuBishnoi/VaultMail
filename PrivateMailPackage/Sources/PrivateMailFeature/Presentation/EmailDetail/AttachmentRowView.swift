@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import Network
+#endif
 
 /// A single attachment row in the email detail view.
 /// Shows file type icon, filename, size, and download/action controls.
@@ -21,6 +24,8 @@ struct AttachmentRowView: View {
     @State private var downloadTask: Task<Void, Never>?
     @State private var showSecurityAlert = false
     @State private var securityMessage = ""
+    @State private var showCellularAlert = false
+    @State private var pendingSecurityWarning: String?
 
     // MARK: - Download State
 
@@ -69,6 +74,7 @@ struct AttachmentRowView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityDescription)
         .accessibilityHint(accessibilityHintText)
+        .accessibilityIdentifier("attachment-row-\(attachment.id)")
         .onAppear {
             if attachment.isDownloaded {
                 downloadState = .downloaded
@@ -81,6 +87,21 @@ struct AttachmentRowView: View {
             }
         } message: {
             Text(securityMessage)
+        }
+        .alert("Large Download", isPresented: $showCellularAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Download") {
+                // If there's a pending security warning, show that next
+                if let warning = pendingSecurityWarning {
+                    pendingSecurityWarning = nil
+                    securityMessage = warning
+                    showSecurityAlert = true
+                } else {
+                    startDownload()
+                }
+            }
+        } message: {
+            Text("This attachment is \(formattedSize). Download on cellular?")
         }
     }
 
@@ -135,6 +156,10 @@ struct AttachmentRowView: View {
 
         case .downloading:
             HStack(spacing: 8) {
+                // TODO: V1 stub — use determinate ProgressView(value:total:) when
+                // real download with progress reporting is wired (FR-ED-03 requires
+                // determinate progress when sizeBytes is known). Wire
+                // DownloadAttachmentUseCaseProtocol to return AsyncStream<Double>.
                 ProgressView()
 
                 Button {
@@ -189,12 +214,31 @@ struct AttachmentRowView: View {
     // MARK: - Download Logic
 
     private func initiateDownload() {
-        if let warning = downloadUseCase.securityWarning(for: attachment.filename) {
+        let securityWarning = downloadUseCase.securityWarning(for: attachment.filename)
+        let needsCellularWarning = isCellular && downloadUseCase.requiresCellularWarning(sizeBytes: attachment.sizeBytes)
+
+        // Per spec FR-ED-03: cellular warning MUST appear in addition to security warning
+        if needsCellularWarning {
+            pendingSecurityWarning = securityWarning
+            showCellularAlert = true
+        } else if let warning = securityWarning {
             securityMessage = warning
             showSecurityAlert = true
         } else {
             startDownload()
         }
+    }
+
+    /// Best-effort cellular network detection.
+    private var isCellular: Bool {
+        #if os(iOS)
+        let monitor = NWPathMonitor()
+        let path = monitor.currentPath
+        monitor.cancel()
+        return path.usesInterfaceType(.cellular)
+        #else
+        return false
+        #endif
     }
 
     private func startDownload() {

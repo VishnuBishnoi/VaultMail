@@ -49,13 +49,27 @@ struct HTMLEmailView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let webView = buildWebView(coordinator: context.coordinator)
-        loadContent(into: webView)
+        let styledHTML = HTMLSanitizer.injectDynamicTypeCSS(
+            htmlContent,
+            fontSizePoints: fontSizePoints
+        )
+        context.coordinator.lastLoadedHTML = styledHTML
+        webView.loadHTMLString(styledHTML, baseURL: nil)
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onLinkTapped = onLinkTapped
-        loadContent(into: webView)
+        // Only reload if the HTML content actually changed (M2 fix: avoid
+        // unnecessary WKWebView reloads on every SwiftUI re-render).
+        let styledHTML = HTMLSanitizer.injectDynamicTypeCSS(
+            htmlContent,
+            fontSizePoints: fontSizePoints
+        )
+        if styledHTML != context.coordinator.lastLoadedHTML {
+            context.coordinator.lastLoadedHTML = styledHTML
+            webView.loadHTMLString(styledHTML, baseURL: nil)
+        }
     }
 
     // MARK: - Private Helpers
@@ -82,20 +96,13 @@ struct HTMLEmailView: UIViewRepresentable {
         return webView
     }
 
-    private func loadContent(into webView: WKWebView) {
-        let styledHTML = HTMLSanitizer.injectDynamicTypeCSS(
-            htmlContent,
-            fontSizePoints: fontSizePoints
-        )
-        webView.loadHTMLString(styledHTML, baseURL: nil)
-    }
-
     // MARK: - Coordinator
 
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate {
 
         var onLinkTapped: ((URL) -> Void)?
+        var lastLoadedHTML: String?
         private var contentHeight: Binding<CGFloat>
 
         init(

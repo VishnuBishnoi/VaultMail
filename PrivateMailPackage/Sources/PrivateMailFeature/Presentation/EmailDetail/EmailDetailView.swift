@@ -1,6 +1,7 @@
 import SwiftUI
 #if os(iOS)
 import QuickLook
+import UIKit
 #endif
 
 /// The threaded conversation detail screen.
@@ -71,6 +72,10 @@ public struct EmailDetailView: View {
     @State private var previewURL: URL?
     @State private var showPreview = false
 
+    // MARK: - Trusted Senders (FR-ED-04)
+
+    @State private var trustedSenderEmails: Set<String> = []
+
     // MARK: - Large Thread Pagination (FR-ED-05)
 
     @State private var displayedEmailCount = 25
@@ -80,6 +85,7 @@ public struct EmailDetailView: View {
     // MARK: - Navigation
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // MARK: - Body
 
@@ -138,6 +144,7 @@ public struct EmailDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Loading conversation")
+        .accessibilityIdentifier("email-detail-loading")
     }
 
     // MARK: - Loaded View
@@ -164,15 +171,17 @@ public struct EmailDetailView: View {
                         MessageBubbleView(
                             email: email,
                             isExpanded: expandedEmailIds.contains(email.id),
-                            isTrustedSender: false, // TODO: check TrustedSender
+                            isTrustedSender: trustedSenderEmails.contains(email.fromAddress),
                             onToggleExpand: { toggleExpand(email.id) },
                             onStarToggle: { Task { await toggleStar(email) } },
                             onPreviewAttachment: { previewAttachment($0) },
                             onShareAttachment: { shareAttachment($0) },
+                            onAlwaysLoadImages: { Task { await addTrustedSender(email.fromAddress) } },
                             downloadUseCase: downloadAttachment
                         )
                         .padding(.horizontal)
                         .id(email.id)
+                        .accessibilityIdentifier("message-bubble-\(email.id)")
                     }
 
                     // Smart Reply Suggestions (FR-ED-02)
@@ -217,6 +226,7 @@ public struct EmailDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Error loading conversation. \(message)")
+        .accessibilityIdentifier("email-detail-error")
     }
 
     // MARK: - Offline View
@@ -260,7 +270,8 @@ public struct EmailDetailView: View {
 
     private var showEarlierButton: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.3)) {
+            let animation: Animation? = reduceMotion ? nil : .easeInOut(duration: 0.3)
+            withAnimation(animation) {
                 displayedEmailCount += pageSize
             }
         } label: {
@@ -409,11 +420,9 @@ public struct EmailDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
-        .onAppear {
-            Task {
-                try? await Task.sleep(for: .seconds(3))
-                withAnimation { errorToast = nil }
-            }
+        .task {
+            try? await Task.sleep(for: .seconds(3))
+            withAnimation { errorToast = nil }
         }
     }
 
@@ -421,6 +430,11 @@ public struct EmailDetailView: View {
 
     private func loadThread() async {
         viewState = .loading
+
+        // Load trusted senders (FR-ED-04)
+        if let senders = try? await fetchEmailDetail.getAllTrustedSenderEmails() {
+            trustedSenderEmails = senders
+        }
 
         do {
             let loadedThread = try await fetchEmailDetail.fetchThread(threadId: threadId)
@@ -500,10 +514,24 @@ public struct EmailDetailView: View {
         }
     }
 
+    // MARK: - Trusted Sender Actions
+
+    private func addTrustedSender(_ senderEmail: String) async {
+        do {
+            try await fetchEmailDetail.saveTrustedSender(email: senderEmail)
+            trustedSenderEmails.insert(senderEmail)
+        } catch {
+            withAnimation {
+                errorToast = "Couldn't save trusted sender."
+            }
+        }
+    }
+
     // MARK: - Expand/Collapse
 
     private func toggleExpand(_ emailId: String) {
-        withAnimation(.easeInOut(duration: 0.25)) {
+        let animation: Animation? = reduceMotion ? nil : .easeInOut(duration: 0.25)
+        withAnimation(animation) {
             if expandedEmailIds.contains(emailId) {
                 expandedEmailIds.remove(emailId)
             } else {
@@ -623,7 +651,26 @@ public struct EmailDetailView: View {
     }
 
     private func shareAttachment(_ url: URL) {
-        // System share handled at the AttachmentRowView level
+        #if os(iOS)
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene }).first,
+              let rootVC = windowScene.windows.first?.rootViewController else {
+            return
+        }
+        let activityVC = UIActivityViewController(
+            activityItems: [url],
+            applicationActivities: nil
+        )
+        // iPad popover anchor
+        activityVC.popoverPresentationController?.sourceView = rootVC.view
+        activityVC.popoverPresentationController?.sourceRect = CGRect(
+            x: rootVC.view.bounds.midX,
+            y: rootVC.view.bounds.midY,
+            width: 0,
+            height: 0
+        )
+        rootVC.present(activityVC, animated: true)
+        #endif
     }
 
     // MARK: - Computed

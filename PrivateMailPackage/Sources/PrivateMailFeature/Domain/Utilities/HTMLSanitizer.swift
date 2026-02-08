@@ -66,6 +66,9 @@ public enum HTMLSanitizer {
         result = neutralizeJavaScriptURIs(result)
         result = neutralizeDataURIsExceptImages(result)
 
+        // --- Phase 6b: Replace cid: inline images with placeholder (E-07) ---
+        result = replaceCIDImages(result)
+
         // --- Phase 7: Handle remote images ---
         var blockedCount = 0
         if !loadRemoteImages {
@@ -269,6 +272,19 @@ public enum HTMLSanitizer {
         result = result.replacingOccurrences(of: sentinel, with: "data:")
 
         return result
+    }
+
+    /// Replace `cid:` inline image references with a user-visible placeholder.
+    ///
+    /// Per spec E-07, `cid:` images are not downloaded during sync (V1) and
+    /// must NOT be counted as tracking pixels or remote content.
+    private static func replaceCIDImages(_ html: String) -> String {
+        let pattern = "<img\\b[^>]*\\bsrc\\s*=\\s*[\"']cid:[^\"']*[\"'][^>]*/?>|<img\\b[^>]*\\bsrc\\s*=\\s*[\"']cid:[^\"']*[\"'][^>]*>"
+        return html.replacingOccurrences(
+            of: pattern,
+            with: "<span style=\"display:inline-block;padding:4px 8px;background:#f0f0f0;border:1px solid #ccc;border-radius:4px;font-size:12px;color:#888;\">[Inline image not available]</span>",
+            options: [.regularExpression, .caseInsensitive]
+        )
     }
 
     /// Replace remote `<img>` sources (http/https) with a placeholder comment.

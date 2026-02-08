@@ -9,6 +9,13 @@ import Foundation
 public protocol FetchEmailDetailUseCaseProtocol {
     /// Fetch a thread by ID with all emails.
     func fetchThread(threadId: String) async throws -> Thread
+
+    // MARK: - Trusted Senders (FR-ED-04)
+
+    /// Get all trusted sender email addresses.
+    func getAllTrustedSenderEmails() async throws -> Set<String>
+    /// Save a sender as trusted (always load remote images).
+    func saveTrustedSender(email: String) async throws
 }
 
 @MainActor
@@ -30,5 +37,15 @@ public final class FetchEmailDetailUseCase: FetchEmailDetailUseCaseProtocol {
         } catch {
             throw EmailDetailError.loadFailed(error.localizedDescription)
         }
+    }
+
+    public func getAllTrustedSenderEmails() async throws -> Set<String> {
+        let senders = try await repository.getAllTrustedSenders()
+        return Set(senders.map(\.senderEmail))
+    }
+
+    public func saveTrustedSender(email senderEmail: String) async throws {
+        let sender = TrustedSender(senderEmail: senderEmail)
+        try await repository.saveTrustedSender(sender)
     }
 }
