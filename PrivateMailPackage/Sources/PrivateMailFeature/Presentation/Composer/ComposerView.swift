@@ -5,6 +5,7 @@ struct ComposerView: View {
 
     let mode: ComposerMode
     let fromAccount: String?
+    let initialSmartReplies: [String]
 
     @State private var toAddresses: [String] = []
     @State private var ccAddresses: [String] = []
@@ -18,12 +19,14 @@ struct ComposerView: View {
     @State private var showDiscardConfirmation = false
     @State private var pendingPromptQueue: [ComposerSendPrompt] = []
     @State private var activePrompt: ComposerSendPrompt?
+    @State private var smartReplies: [String] = []
 
     @State private var initialLoaded = false
 
-    init(mode: ComposerMode = .new, fromAccount: String? = nil) {
+    init(mode: ComposerMode = .new, fromAccount: String? = nil, initialSmartReplies: [String] = []) {
         self.mode = mode
         self.fromAccount = fromAccount
+        self.initialSmartReplies = initialSmartReplies
     }
 
     private var totalAttachmentBytes: Int {
@@ -37,6 +40,14 @@ struct ComposerView: View {
             bcc: bccAddresses,
             attachmentTotalBytes: totalAttachmentBytes
         )
+    }
+
+    private var forwardAttachmentReadiness: ForwardAttachmentReadiness {
+        ForwardAttachmentResolver.evaluateForwardReadiness(attachments: attachments)
+    }
+
+    private var canTapSend: Bool {
+        sendValidation.canSend && forwardAttachmentReadiness.canSend
     }
 
     private var invalidAddressSet: Set<String> {
@@ -79,6 +90,16 @@ struct ComposerView: View {
                         onInsertLink: { insertMarkdown("[text](https://)") }
                     )
 
+                    SmartReplyChipView(suggestions: smartReplies) { suggestion in
+                        if bodyText.isEmpty {
+                            bodyText = suggestion
+                        } else {
+                            bodyText += "\n\(suggestion)"
+                        }
+                    }
+
+                    AttachmentPickerView(attachments: $attachments)
+
                     if ComposerBodyPolicy.shouldWarnAboutBodySize(bodyText) {
                         Label("Body exceeds 100KB", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
@@ -86,6 +107,11 @@ struct ComposerView: View {
 
                     if sendValidation.exceedsAttachmentLimit {
                         Label("Attachments exceed 25 MB. Remove attachments to send.", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+
+                    if !forwardAttachmentReadiness.canSend {
+                        Label("Forward contains pending attachments. Download or remove them before send.", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                     }
                 }
@@ -114,6 +140,7 @@ struct ComposerView: View {
                 guard !initialLoaded else { return }
                 initialLoaded = true
                 applyPrefill()
+                loadInitialSmartReplies()
             }
         }
     }
@@ -150,7 +177,7 @@ struct ComposerView: View {
 
         ToolbarItem(placement: .confirmationAction) {
             Button("Send") { attemptSend() }
-                .disabled(!sendValidation.canSend)
+                .disabled(!canTapSend)
                 .keyboardShortcut("D", modifiers: [.command, .shift])
         }
     }
@@ -195,6 +222,7 @@ struct ComposerView: View {
     }
 
     private func attemptSend() {
+        guard canTapSend else { return }
         let prompts = ComposerSendPromptPolicy.requiredPrompts(subject: subject, body: bodyText)
         if prompts.isEmpty {
             dismiss()
@@ -215,6 +243,15 @@ struct ComposerView: View {
         activePrompt = pendingPromptQueue.first
         if activePrompt == nil {
             dismiss()
+        }
+    }
+
+    private func loadInitialSmartReplies() {
+        switch mode {
+        case .reply, .replyAll:
+            smartReplies = Array(initialSmartReplies.prefix(3))
+        case .new, .forward:
+            smartReplies = []
         }
     }
 }
