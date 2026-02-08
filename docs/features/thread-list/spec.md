@@ -1,9 +1,9 @@
 ---
 title: "Thread List — Specification"
-version: "1.2.0"
+version: "1.2.1"
 status: locked
 created: 2025-02-07
-updated: 2026-02-07
+updated: 2026-02-08
 authors:
   - Core Team
 reviewers:
@@ -29,7 +29,7 @@ This specification defines the thread list screen — the primary view of the em
 
 ### Goals
 
-- **G-01**: Display emails grouped by thread, sorted by most recent date, with pagination for large mailboxes (up to 50K threads per Constitution TC-06)
+- **G-01**: Display emails grouped by thread, sorted by most recent date, with pagination for large mailboxes (up to 50K emails per Constitution TC-06)
 - **G-02**: Provide category-based filtering (All, Primary, Social, Promotions, Updates) using AI category badges
 - **G-03**: Support gestures (pull-to-refresh, swipe archive/delete, multi-select with batch actions)
 - **G-04**: Multi-account navigation with per-account and unified inbox views
@@ -79,7 +79,7 @@ Each thread row **MUST** display the following elements:
 - The client **MUST** implement cursor-based pagination, loading threads in pages of 25.
 - Additional pages **MUST** load automatically when the user scrolls near the bottom (infinite scroll with pagination).
 - The client **MUST** display a loading indicator at the bottom while fetching the next page.
-- The client **MUST** handle mailboxes with up to 50K threads without excessive memory usage (see Constitution TC-06).
+- The client **MUST** handle mailboxes backed by up to 50K emails without excessive memory usage (see Constitution TC-06).
 
 **View States**
 
@@ -91,12 +91,14 @@ The thread list **MUST** handle the following states:
 | Loaded (with threads) | Scrollable thread list |
 | Empty (no threads in folder) | Centered illustration + "No emails" message + "Pull to refresh" hint |
 | Empty (filtered, no matches) | "No emails in [Category]" message |
-| Error (sync failed) | Inline banner at top with error message + "Retry" button; stale cached data still shown below |
+| Error (sync failed, cache available) | Inline banner at top with error message + "Retry" button; stale cached data still shown below |
+| Error (local fetch failed, no cache) | Full-screen error state with message + "Retry" button |
 | Offline | Inline banner "You're offline" + cached data shown; pull-to-refresh disabled with "Offline" hint |
 
 **Error Handling**
 
-- If thread fetching from the local store fails, the client **MUST** display the error state with a retry action.
+- If thread fetching from the local store fails and cached rows are available, the client **MUST** show the inline error banner while continuing to render cached rows.
+- If thread fetching from the local store fails and no cached rows are available, the client **MUST** show the full-screen error state with a retry action.
 - If pagination fetch fails, the client **MUST** display an inline retry button at the list bottom — previously loaded threads **MUST** remain visible.
 
 ### FR-TL-02: Category Filtering
@@ -159,7 +161,8 @@ The client **MUST** support standard iOS/macOS gestures for thread manipulation.
 
 **Multi-Select Mode**
 
-- Long-press on any thread row **MUST** activate multi-select mode.
+- On iOS, long-press on any thread row **MUST** activate multi-select mode.
+- On macOS, multi-select **MUST** be activated using standard modifier selection (`⌘`-click and `⇧`-click) and keyboard navigation patterns.
 - In multi-select mode:
   - A checkbox **MUST** appear on each thread row.
   - A toolbar **MUST** appear at the bottom with batch actions: Archive, Delete, Mark Read, Mark Unread, Star, Move.
@@ -194,7 +197,10 @@ The client **MUST** display the following system folders in a sidebar or navigat
 
 - Custom Gmail labels **MUST** be displayed below system folders, sorted alphabetically.
 - Selecting a folder **MUST** update the thread list to show only threads in that folder.
-- The Outbox **MUST** display emails with `sendState ∈ {queued, sending, failed}` (see Email Sync FR-SYNC-07). Each Outbox row **MUST** show the send state and allow retry (for failed) or cancel (for queued).
+- The Outbox **MUST** display emails with `sendState ∈ {queued, sending, failed}` (see Email Sync FR-SYNC-07).
+- When the Outbox folder is selected, the list **MUST** operate in Outbox email mode (email rows, not thread-grouped rows).
+- Each Outbox row **MUST** show recipient, subject, queued/sent-attempt timestamp, and send state, and **MUST** allow retry (for failed) or cancel (for queued).
+- In Outbox email mode, thread-specific features **MUST NOT** be shown: category badges/tabs, thread unread/star indicators, and thread-level archive/delete gestures.
 - When the Outbox folder is selected, category tabs **MUST** be hidden. Outbox emails are filtered by `sendState`, not `aiCategory`.
 
 **Account Switcher**
@@ -226,10 +232,11 @@ flowchart LR
     TL -->|Tap settings| ST["Settings"]
     TL -->|Swipe right| AR["Archive (undo toast)"]
     TL -->|Swipe left| DL["Delete (undo toast)"]
-    TL -->|Long press| MS["Multi-Select Mode"]
+    TL -->|Long press / modifier select| MS["Multi-Select Mode"]
 ```
 
 - Tapping a thread **MUST** push the Email Detail view onto the navigation stack.
+- When the Outbox folder is selected, tapping an Outbox row **MUST** open the Email Composer in queued/failed draft context instead of Email Detail.
 - Tapping compose **MUST** present the Email Composer as a modal sheet.
 - The compose button **MUST** be a floating action button (FAB) or toolbar button, always visible.
 - Navigation transitions **MUST** follow platform conventions (push on iOS, inline on macOS).
@@ -376,3 +383,4 @@ flowchart TD
 | 1.0.0 | 2025-02-07 | Core Team | Extracted from monolithic spec v1.2.0 section 5.3. |
 | 1.1.0 | 2026-02-07 | Core Team | Review round 1: Added G-XX/NG-XX IDs (SF-03). Expanded FR-TL-01 with thread row content table, timestamp format, pagination (25/page cursor-based), view states (loading/empty/error/offline), error handling. Expanded FR-TL-02 with category tab table, unread badges per tab, AI unavailability fallback, forums handling. Expanded FR-TL-03 with swipe action table, undo toast (5s), multi-select toolbar, batch action details, optimistic updates with revert, error handling. Renamed FR-TL-04 to include folder navigation: system folders table with Outbox (FR-SYNC-07), custom labels, account indicator in unified view. Expanded FR-TL-05 with compose FAB, folder navigation link. Added NFR-TL-03 (Accessibility: WCAG 2.1 AA, VoiceOver, Dynamic Type, color independence, Reduce Motion). Added NFR-TL-04 (Memory: ≤50MB target for 500+ threads). Expanded Data Model section with field usage table. Added architecture diagram with MV pattern note (no ViewModels). Expanded iOS platform section with adaptive layout, compose button, account switcher. Expanded macOS section with keyboard shortcuts, context menu, multi-select. Added alternatives (UIKit, category-as-screens). Status → locked. |
 | 1.2.0 | 2026-02-07 | Core Team | Post-lock compliance fixes: PL-01 — fixed architecture diagram to route swipe actions through ArchiveThreadUseCase/DeleteThreadUseCase instead of directly to EmailRepository (FR-FOUND-01 compliance); MV note now explicitly states "views call use cases only, never repositories directly". PL-02 — clarified that Unified Inbox mode hides folder sidebar (system folders are per-account; user must select an account to see its folders). MC-01 — added clause that Outbox disables category tabs (filtered by sendState, not aiCategory). |
+| 1.2.1 | 2026-02-08 | Core Team | Review fixes: aligned mailbox scale references with Constitution TC-06 (50K emails, not threads); split error states into cache-available vs no-cache local fetch failure; scoped multi-select activation by platform (iOS long-press, macOS modifier selection); defined Outbox email-mode behavior (row schema, disabled thread-only UI, and navigation to composer context). |
