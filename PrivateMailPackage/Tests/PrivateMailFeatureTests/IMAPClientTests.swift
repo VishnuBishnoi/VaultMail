@@ -491,17 +491,17 @@ struct IMAPClientTests {
     @Test("Start IDLE registers handler for new mail (AC-F-05)")
     func startIDLE() async throws {
         let client = MockIMAPClient()
-        var newMailReceived = false
+        let mailFlag = MailReceivedFlag()
 
         try await client.startIDLE {
-            newMailReceived = true
+            mailFlag.set()
         }
 
         #expect(client.startIDLECallCount == 1)
 
         // Simulate new mail
         client.simulateNewMail()
-        #expect(newMailReceived)
+        #expect(mailFlag.value)
     }
 
     @Test("Stop IDLE clears handler")
@@ -610,5 +610,25 @@ struct IMAPConnectionConstantsTests {
     @Test("Gmail SMTP port is 465 (implicit TLS)")
     func gmailSMTPPort() {
         #expect(AppConstants.gmailSmtpPort == 465)
+    }
+}
+
+// MARK: - Test Helpers
+
+/// Thread-safe flag for testing async callbacks in @Sendable closures.
+private final class MailReceivedFlag: @unchecked Sendable {
+    private var _value = false
+    private let lock = NSLock()
+
+    var value: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _value
+    }
+
+    func set() {
+        lock.lock()
+        defer { lock.unlock() }
+        _value = true
     }
 }
