@@ -252,7 +252,8 @@ struct ComposeEmailUseCaseTests {
             subject: "Test Subject",
             bodyPlain: "Test Body",
             inReplyTo: nil,
-            references: nil
+            references: nil,
+            attachments: []
         )
 
         #expect(!draftId.isEmpty)
@@ -297,7 +298,8 @@ struct ComposeEmailUseCaseTests {
             subject: "Updated Subject",
             bodyPlain: "Updated Body",
             inReplyTo: nil,
-            references: nil
+            references: nil,
+            attachments: []
         )
 
         #expect(draftId == existingEmail.id)
@@ -324,7 +326,8 @@ struct ComposeEmailUseCaseTests {
                 subject: "",
                 bodyPlain: "",
                 inReplyTo: nil,
-                references: nil
+                references: nil,
+                attachments: []
             )
         }
     }

@@ -454,7 +454,8 @@ public struct ComposerView: View {
                 subject: subject,
                 bodyPlain: bodyText,
                 inReplyTo: inReplyToForMode,
-                references: referencesForMode
+                references: referencesForMode,
+                attachments: attachments
             )
             draftId = id
         } catch {
@@ -496,7 +497,8 @@ public struct ComposerView: View {
                 subject: subject,
                 bodyPlain: bodyText,
                 inReplyTo: inReplyToForMode,
-                references: referencesForMode
+                references: referencesForMode,
+                attachments: attachments
             )
 
             // Queue for sending
@@ -589,7 +591,7 @@ private final class PreviewComposeEmailUseCase: ComposeEmailUseCaseProtocol {
     func buildPrefill(mode: ComposerMode, userEmail: String) -> ComposerPrefill {
         ComposerPrefill()
     }
-    func saveDraft(draftId: String?, accountId: String, threadId: String?, toAddresses: [String], ccAddresses: [String], bccAddresses: [String], subject: String, bodyPlain: String, inReplyTo: String?, references: String?) async throws -> String {
+    func saveDraft(draftId: String?, accountId: String, threadId: String?, toAddresses: [String], ccAddresses: [String], bccAddresses: [String], subject: String, bodyPlain: String, inReplyTo: String?, references: String?, attachments: [AttachmentItem]) async throws -> String {
         UUID().uuidString
     }
     func queueForSending(emailId: String) async throws {}

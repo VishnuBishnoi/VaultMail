@@ -38,8 +38,15 @@ struct PrivateMailApp: App {
         )
 
         let emailRepo = EmailRepositoryImpl(modelContainer: modelContainer)
+        let connectionPool = ConnectionPool()
+
         fetchThreads = FetchThreadsUseCase(repository: emailRepo)
-        manageThreadActions = ManageThreadActionsUseCase(repository: emailRepo)
+        manageThreadActions = ManageThreadActionsUseCase(
+            repository: emailRepo,
+            connectionProvider: connectionPool,
+            accountRepository: accountRepo,
+            keychainManager: keychainManager
+        )
         composeEmail = ComposeEmailUseCase(
             repository: emailRepo,
             accountRepository: accountRepo,
@@ -48,7 +55,6 @@ struct PrivateMailApp: App {
         )
         queryContacts = QueryContactsUseCase(repository: emailRepo)
 
-        let connectionPool = ConnectionPool()
         syncEmails = SyncEmailsUseCase(
             accountRepository: accountRepo,
             emailRepository: emailRepo,

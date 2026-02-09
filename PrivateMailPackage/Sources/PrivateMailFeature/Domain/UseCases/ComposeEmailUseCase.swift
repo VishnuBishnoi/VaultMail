@@ -22,7 +22,8 @@ public protocol ComposeEmailUseCaseProtocol {
         subject: String,
         bodyPlain: String,
         inReplyTo: String?,
-        references: String?
+        references: String?,
+        attachments: [AttachmentItem]
     ) async throws -> String
 
     /// Queue an email for sending (sendState → .queued, isDraft → false).
@@ -100,7 +101,8 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
         subject: String,
         bodyPlain: String,
         inReplyTo: String?,
-        references: String?
+        references: String?,
+        attachments: [AttachmentItem]
     ) async throws -> String {
         do {
             let toJSON = encodeAddresses(toAddresses)
@@ -118,6 +120,10 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
                 existingEmail.references = references
                 existingEmail.dateSent = Date()
                 try await repository.saveEmail(existingEmail)
+
+                // Sync attachments: remove old, add current
+                try await syncAttachments(attachments, for: existingEmail)
+
                 return draftId
             }
 
@@ -157,6 +163,9 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
 
             try await repository.saveEmail(email)
 
+            // Save attachments
+            try await syncAttachments(attachments, for: email)
+
             // Place in Drafts folder
             let folders = try await repository.getFolders(accountId: accountId)
             if let draftsFolder = folders.first(where: { $0.folderType == FolderType.drafts.rawValue }) {
@@ -172,6 +181,34 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
             throw error
         } catch {
             throw ComposerError.saveDraftFailed(error.localizedDescription)
+        }
+    }
+
+    /// Syncs attachment items from the composer to the Email model.
+    ///
+    /// Removes attachments no longer present, adds new ones, skips unchanged.
+    private func syncAttachments(_ items: [AttachmentItem], for email: Email) async throws {
+        let existingIds = Set(email.attachments.map(\.id))
+        let newIds = Set(items.map(\.id))
+
+        // Remove attachments that are no longer in the composer
+        let toRemove = email.attachments.filter { !newIds.contains($0.id) }
+        for attachment in toRemove {
+            email.attachments.removeAll { $0.id == attachment.id }
+        }
+
+        // Add new attachments
+        for item in items where !existingIds.contains(item.id) {
+            let attachment = Attachment(
+                id: item.id,
+                filename: item.filename,
+                mimeType: item.mimeType,
+                sizeBytes: item.sizeBytes,
+                localPath: item.localPath,
+                isDownloaded: item.localPath != nil
+            )
+            attachment.email = email
+            try await repository.saveAttachment(attachment)
         }
     }
 
@@ -263,6 +300,19 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
             email.fromAddress = account.email
             email.fromName = account.displayName.isEmpty ? nil : account.displayName
 
+            // Load attachment data from local files
+            var attachmentDataList: [MIMEEncoder.AttachmentData] = []
+            for attachment in email.attachments {
+                guard let localPath = attachment.localPath else { continue }
+                let fileURL = URL(fileURLWithPath: localPath)
+                guard let fileData = try? Data(contentsOf: fileURL) else { continue }
+                attachmentDataList.append(MIMEEncoder.AttachmentData(
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    data: fileData
+                ))
+            }
+
             // Build MIME message
             let messageData = MIMEEncoder.encode(
                 from: account.email,
@@ -276,7 +326,8 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
                 messageId: email.messageId,
                 inReplyTo: email.inReplyTo,
                 references: email.references,
-                date: Date()
+                date: Date(),
+                attachments: attachmentDataList
             )
 
             // Connect to SMTP and send

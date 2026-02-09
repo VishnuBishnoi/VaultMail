@@ -5,11 +5,23 @@ import Foundation
 /// Handles:
 /// - Header encoding (From, To, CC, BCC, Subject, Date, Message-ID, etc.)
 /// - Plain text body encoding
+/// - Multipart/alternative for plain+HTML bodies
+/// - Multipart/mixed for messages with attachments (Base64-encoded)
 /// - RFC 2047 encoded-word for non-ASCII subjects/names
 /// - Proper CRLF line endings per RFC 5322
 ///
 /// Spec ref: Email Composer spec FR-COMP-02
 enum MIMEEncoder {
+
+    /// Attachment data for MIME encoding.
+    struct AttachmentData: Sendable {
+        /// Original filename
+        let filename: String
+        /// MIME type (e.g., "application/pdf", "image/jpeg")
+        let mimeType: String
+        /// Raw file data
+        let data: Data
+    }
 
     /// Encodes an email into a complete RFC 2822 MIME message.
     ///
@@ -26,6 +38,7 @@ enum MIMEEncoder {
     ///   - inReplyTo: Optional In-Reply-To header
     ///   - references: Optional References header
     ///   - date: Send date
+    ///   - attachments: File attachments to include (default: empty)
     /// - Returns: Raw MIME message data for SMTP DATA command
     static func encode(
         from: String,
@@ -39,7 +52,8 @@ enum MIMEEncoder {
         messageId: String,
         inReplyTo: String?,
         references: String?,
-        date: Date
+        date: Date,
+        attachments: [AttachmentData] = []
     ) -> Data {
         var headers: [String] = []
 
@@ -84,42 +98,138 @@ enum MIMEEncoder {
         // User-Agent
         headers.append("X-Mailer: PrivateMail/1.0")
 
-        // Body encoding
+        // Build body based on content type and attachments
+        if !attachments.isEmpty {
+            // multipart/mixed: text body (or multipart/alternative) + attachments
+            return buildMixedMessage(
+                headers: headers,
+                bodyPlain: bodyPlain,
+                bodyHTML: bodyHTML,
+                attachments: attachments
+            )
+        } else if let bodyHTML, !bodyHTML.isEmpty {
+            // multipart/alternative: plain + HTML (no attachments)
+            return buildAlternativeMessage(headers: headers, bodyPlain: bodyPlain, bodyHTML: bodyHTML)
+        } else {
+            // Simple text/plain message
+            return buildPlainMessage(headers: headers, bodyPlain: bodyPlain)
+        }
+    }
+
+    // MARK: - Message Builders
+
+    /// Builds a simple text/plain message with no attachments.
+    private static func buildPlainMessage(headers: [String], bodyPlain: String) -> Data {
+        var hdrs = headers
+        hdrs.append("Content-Type: text/plain; charset=UTF-8")
+        hdrs.append("Content-Transfer-Encoding: quoted-printable")
+
+        let headerBlock = hdrs.joined(separator: "\r\n")
+        let message = "\(headerBlock)\r\n\r\n\(encodeQuotedPrintable(bodyPlain))\r\n"
+        return Data(message.utf8)
+    }
+
+    /// Builds a multipart/alternative message (plain + HTML, no attachments).
+    private static func buildAlternativeMessage(
+        headers: [String],
+        bodyPlain: String,
+        bodyHTML: String
+    ) -> Data {
+        var hdrs = headers
+        let boundary = generateBoundary()
+        hdrs.append("Content-Type: multipart/alternative; boundary=\"\(boundary)\"")
+
+        let headerBlock = hdrs.joined(separator: "\r\n")
+        var message = "\(headerBlock)\r\n\r\n"
+
+        // Plain text part
+        message += "--\(boundary)\r\n"
+        message += "Content-Type: text/plain; charset=UTF-8\r\n"
+        message += "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+        message += encodeQuotedPrintable(bodyPlain)
+        message += "\r\n"
+
+        // HTML part
+        message += "--\(boundary)\r\n"
+        message += "Content-Type: text/html; charset=UTF-8\r\n"
+        message += "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+        message += encodeQuotedPrintable(bodyHTML)
+        message += "\r\n"
+
+        // Close boundary
+        message += "--\(boundary)--\r\n"
+
+        return Data(message.utf8)
+    }
+
+    /// Builds a multipart/mixed message with text body + file attachments.
+    ///
+    /// Structure:
+    /// ```
+    /// multipart/mixed
+    /// ├── text/plain (or multipart/alternative if HTML exists)
+    /// ├── attachment 1 (Base64)
+    /// └── attachment 2 (Base64)
+    /// ```
+    private static func buildMixedMessage(
+        headers: [String],
+        bodyPlain: String,
+        bodyHTML: String?,
+        attachments: [AttachmentData]
+    ) -> Data {
+        var hdrs = headers
+        let mixedBoundary = generateBoundary()
+        hdrs.append("Content-Type: multipart/mixed; boundary=\"\(mixedBoundary)\"")
+
+        let headerBlock = hdrs.joined(separator: "\r\n")
+        var message = "\(headerBlock)\r\n\r\n"
+
+        // Text body part
         if let bodyHTML, !bodyHTML.isEmpty {
-            // Multipart/alternative with plain + HTML
-            let boundary = generateBoundary()
-            headers.append("Content-Type: multipart/alternative; boundary=\"\(boundary)\"")
+            // Nested multipart/alternative for plain + HTML
+            let altBoundary = generateBoundary()
 
-            let headerBlock = headers.joined(separator: "\r\n")
-            var message = "\(headerBlock)\r\n\r\n"
+            message += "--\(mixedBoundary)\r\n"
+            message += "Content-Type: multipart/alternative; boundary=\"\(altBoundary)\"\r\n\r\n"
 
-            // Plain text part
-            message += "--\(boundary)\r\n"
+            // Plain text sub-part
+            message += "--\(altBoundary)\r\n"
             message += "Content-Type: text/plain; charset=UTF-8\r\n"
             message += "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
             message += encodeQuotedPrintable(bodyPlain)
             message += "\r\n"
 
-            // HTML part
-            message += "--\(boundary)\r\n"
+            // HTML sub-part
+            message += "--\(altBoundary)\r\n"
             message += "Content-Type: text/html; charset=UTF-8\r\n"
             message += "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
             message += encodeQuotedPrintable(bodyHTML)
             message += "\r\n"
 
-            // Close boundary
-            message += "--\(boundary)--\r\n"
-
-            return Data(message.utf8)
+            message += "--\(altBoundary)--\r\n"
         } else {
-            // Simple text/plain message
-            headers.append("Content-Type: text/plain; charset=UTF-8")
-            headers.append("Content-Transfer-Encoding: quoted-printable")
-
-            let headerBlock = headers.joined(separator: "\r\n")
-            let message = "\(headerBlock)\r\n\r\n\(encodeQuotedPrintable(bodyPlain))\r\n"
-            return Data(message.utf8)
+            // Simple text/plain part
+            message += "--\(mixedBoundary)\r\n"
+            message += "Content-Type: text/plain; charset=UTF-8\r\n"
+            message += "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+            message += encodeQuotedPrintable(bodyPlain)
+            message += "\r\n"
         }
+
+        // Attachment parts
+        for attachment in attachments {
+            message += "--\(mixedBoundary)\r\n"
+            message += "Content-Type: \(attachment.mimeType); name=\"\(encodeAttachmentFilename(attachment.filename))\"\r\n"
+            message += "Content-Disposition: attachment; filename=\"\(encodeAttachmentFilename(attachment.filename))\"\r\n"
+            message += "Content-Transfer-Encoding: base64\r\n\r\n"
+            message += encodeBase64WithLineBreaks(attachment.data)
+            message += "\r\n"
+        }
+
+        // Close mixed boundary
+        message += "--\(mixedBoundary)--\r\n"
+
+        return Data(message.utf8)
     }
 
     // MARK: - Date Formatting
@@ -170,6 +280,37 @@ enum MIMEEncoder {
         let data = Data(value.utf8)
         let base64 = data.base64EncodedString()
         return "=?UTF-8?B?\(base64)?="
+    }
+
+    // MARK: - Attachment Filename Encoding
+
+    /// Encodes a filename for use in Content-Type/Content-Disposition headers.
+    /// Uses RFC 2047 if non-ASCII characters are present.
+    private static func encodeAttachmentFilename(_ filename: String) -> String {
+        if filename.allSatisfy({ $0.isASCII }) {
+            return filename
+        }
+        return encodeRFC2047(filename)
+    }
+
+    // MARK: - Base64 Encoding
+
+    /// Encodes data as Base64 with CRLF line breaks every 76 characters per RFC 2045.
+    private static func encodeBase64WithLineBreaks(_ data: Data) -> String {
+        let base64 = data.base64EncodedString()
+        var result = ""
+        var index = base64.startIndex
+
+        while index < base64.endIndex {
+            let endIndex = base64.index(index, offsetBy: 76, limitedBy: base64.endIndex) ?? base64.endIndex
+            result += base64[index..<endIndex]
+            if endIndex < base64.endIndex {
+                result += "\r\n"
+            }
+            index = endIndex
+        }
+
+        return result
     }
 
     // MARK: - Quoted-Printable Encoding

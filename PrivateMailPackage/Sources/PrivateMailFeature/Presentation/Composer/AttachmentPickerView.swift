@@ -143,11 +143,21 @@ struct AttachmentPickerView: View {
             let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             let mimeType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
 
+            // Copy file to temp directory while security scope is active.
+            // After defer releases the scope, the original URL may be inaccessible.
+            let localPath: String?
+            if let data = try? Data(contentsOf: url) {
+                let uniqueName = "\(UUID().uuidString.prefix(8))_\(name)"
+                localPath = Self.writeToTempDirectory(data: data, filename: uniqueName)
+            } else {
+                localPath = nil
+            }
+
             let item = AttachmentItem(
                 filename: name,
                 sizeBytes: size,
                 mimeType: mimeType,
-                localPath: url.path
+                localPath: localPath
             )
             attachments.append(item)
         }
@@ -160,12 +170,34 @@ struct AttachmentPickerView: View {
             let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
             let filename = "Photo_\(UUID().uuidString.prefix(8)).\(ext)"
 
+            // Write photo data to temp directory so executeSend() can read it later.
+            // Without this, the Data only exists in memory and localPath would be nil.
+            let localPath = Self.writeToTempDirectory(data: data, filename: filename)
+
             let attachment = AttachmentItem(
                 filename: filename,
                 sizeBytes: data.count,
-                mimeType: mimeType
+                mimeType: mimeType,
+                localPath: localPath
             )
             attachments.append(attachment)
+        }
+    }
+
+    /// Writes attachment data to a persistent temp directory.
+    ///
+    /// Returns the file path on success, nil on failure.
+    /// Files persist until the OS cleans the temp directory.
+    private static func writeToTempDirectory(data: Data, filename: String) -> String? {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("attachments", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fileURL = dir.appendingPathComponent(filename)
+        do {
+            try data.write(to: fileURL)
+            return fileURL.path
+        } catch {
+            return nil
         }
     }
 
