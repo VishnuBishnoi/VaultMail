@@ -31,6 +31,7 @@ struct ThreadListView: View {
     let composeEmail: ComposeEmailUseCaseProtocol
     let queryContacts: QueryContactsUseCaseProtocol
     let idleMonitor: IDLEMonitorUseCaseProtocol?
+    var modelManager: ModelManager = ModelManager()
 
     @Environment(UndoSendManager.self) private var undoSendManager
 
@@ -218,7 +219,7 @@ struct ThreadListView: View {
                 case .search:
                     SearchPlaceholder()
                 case .settings:
-                    SettingsView(manageAccounts: manageAccounts)
+                    SettingsView(manageAccounts: manageAccounts, modelManager: modelManager)
                 }
             }
             .sheet(item: $composerMode) { mode in

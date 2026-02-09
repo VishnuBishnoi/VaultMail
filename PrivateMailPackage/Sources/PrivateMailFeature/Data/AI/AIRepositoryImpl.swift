@@ -1,0 +1,144 @@
+import Foundation
+
+/// Real AI repository implementation that wires `AIEngineResolver` and prompt templates
+/// to the `AIRepositoryProtocol`.
+///
+/// Replaces `StubAIRepository` when AI engines are available.
+/// All inference runs on-device. No user data leaves the device (P-02).
+///
+/// Spec ref: Foundation spec Section 6, FR-AI-01 through FR-AI-04
+@MainActor
+public final class AIRepositoryImpl: AIRepositoryProtocol {
+
+    private let engineResolver: AIEngineResolver
+
+    public init(engineResolver: AIEngineResolver) {
+        self.engineResolver = engineResolver
+    }
+
+    // MARK: - AIRepositoryProtocol
+
+    public func categorize(email: Email) async throws -> AICategory {
+        let engine = await engineResolver.resolveGenerativeEngine()
+        let available = await engine.isAvailable()
+
+        guard available else {
+            return .uncategorized
+        }
+
+        // Try classify() first
+        let categories = AICategory.allCases
+            .filter { $0 != .uncategorized }
+            .map(\.rawValue)
+
+        do {
+            let result = try await engine.classify(
+                text: "Subject: \(email.subject)\nFrom: \(email.fromAddress)\nBody: \(String((email.bodyPlain ?? email.snippet ?? "").prefix(300)))",
+                categories: categories
+            )
+            return AICategory(rawValue: result) ?? .uncategorized
+        } catch {
+            // Fallback to generate() with prompt template
+        }
+
+        let prompt = PromptTemplates.categorization(
+            subject: email.subject,
+            sender: email.fromName ?? email.fromAddress,
+            body: email.bodyPlain ?? email.snippet ?? ""
+        )
+
+        let stream = await engine.generate(prompt: prompt, maxTokens: 20)
+        var response = ""
+        for await token in stream {
+            response += token
+            if response.count > 50 { break }
+        }
+
+        return PromptTemplates.parseCategorizationResponse(response)
+    }
+
+    public func summarize(thread: Thread) async throws -> String {
+        let engine = await engineResolver.resolveGenerativeEngine()
+        let available = await engine.isAvailable()
+
+        guard available else {
+            return ""
+        }
+
+        // Build message tuples from thread emails
+        let sortedEmails = thread.emails.sorted {
+            ($0.dateReceived ?? .distantPast) < ($1.dateReceived ?? .distantPast)
+        }
+
+        let messages: [(sender: String, date: String, body: String)] = sortedEmails.map { email in
+            let dateStr: String
+            if let date = email.dateReceived {
+                dateStr = date.formatted(date: .abbreviated, time: .shortened)
+            } else {
+                dateStr = "Unknown date"
+            }
+            return (
+                sender: email.fromName ?? email.fromAddress,
+                date: dateStr,
+                body: email.bodyPlain ?? email.snippet ?? ""
+            )
+        }
+
+        let prompt = PromptTemplates.summarize(
+            subject: thread.subject,
+            messages: messages
+        )
+
+        let stream = await engine.generate(prompt: prompt, maxTokens: 200)
+        var response = ""
+        for await token in stream {
+            response += token
+        }
+
+        return PromptTemplates.parseSummarizationResponse(response) ?? ""
+    }
+
+    public func smartReply(email: Email) async throws -> [String] {
+        let engine = await engineResolver.resolveGenerativeEngine()
+        let available = await engine.isAvailable()
+
+        guard available else {
+            return []
+        }
+
+        let prompt = PromptTemplates.smartReply(
+            senderName: email.fromName ?? email.fromAddress,
+            senderEmail: email.fromAddress,
+            subject: email.subject,
+            body: email.bodyPlain ?? email.snippet ?? ""
+        )
+
+        let stream = await engine.generate(prompt: prompt, maxTokens: 300)
+        var response = ""
+        for await token in stream {
+            response += token
+        }
+
+        let replies = PromptTemplates.parseSmartReplyResponse(response)
+        return replies.isEmpty ? [] : replies
+    }
+
+    public func generateEmbedding(text: String) async throws -> Data {
+        let engine = await engineResolver.resolveGenerativeEngine()
+        let available = await engine.isAvailable()
+
+        guard available else {
+            return Data()
+        }
+
+        do {
+            let floats = try await engine.embed(text: text)
+            // Convert [Float] to Data
+            return floats.withUnsafeBufferPointer { buffer in
+                Data(buffer: buffer)
+            }
+        } catch {
+            return Data()
+        }
+    }
+}

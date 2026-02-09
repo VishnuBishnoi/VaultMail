@@ -6,15 +6,17 @@ import SwiftUI
 /// (per Proposal Section 3.4.1). Includes a skip option and storage disclosure
 /// per Constitution TC-06.
 ///
-/// **V1 Note**: AI model download is stubbed (simulated progress). Real download
-/// and SHA-256 verification will be implemented when Data/AI/ layer is built.
+/// Wired to real `ModelManager` for download and SHA-256 verification.
 ///
-/// Spec ref: FR-OB-01 step 4, Proposal Section 3.4.1, Constitution TC-06
+/// Spec ref: FR-OB-01 step 4, Proposal Section 3.4.1, Constitution TC-06, AC-A-08
 struct OnboardingAIModelStep: View {
+    let modelManager: ModelManager
     let onNext: () -> Void
     let onSkip: () -> Void
 
     @State private var downloadState: AIDownloadState = .notDownloaded
+    @State private var recommendedModel: ModelManager.ModelInfo?
+    @State private var downloadProgress: Double = 0
 
     var body: some View {
         VStack(spacing: 20) {
@@ -34,19 +36,21 @@ struct OnboardingAIModelStep: View {
                 .multilineTextAlignment(.center)
 
             // Model info card (Proposal Section 3.4.1)
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    LabeledContent("Model", value: "PrivateMail AI v1")
-                    LabeledContent("Size", value: "~1.5 GB")
-                    LabeledContent("License", value: "Apache 2.0")
-                    LabeledContent("Source", value: "huggingface.co/privatemail")
+            if let model = recommendedModel {
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        LabeledContent("Model", value: model.name)
+                        LabeledContent("Size", value: model.formattedSize)
+                        LabeledContent("License", value: model.license)
+                        LabeledContent("Source", value: model.downloadURL.host ?? "Unknown")
+                    }
+                    .font(.callout)
                 }
-                .font(.callout)
+                .padding(.horizontal)
             }
-            .padding(.horizontal)
 
             // Storage disclosure (Constitution TC-06)
-            Text("Syncing your email typically uses 500 MB – 2 GB of storage on this device, depending on email volume. AI features require an additional 500 MB – 2 GB.")
+            Text("Syncing your email typically uses 500 MB \u{2013} 2 GB of storage on this device, depending on email volume. AI features require an additional \(recommendedModel?.formattedSize ?? "500 MB \u{2013} 1 GB").")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -59,7 +63,7 @@ struct OnboardingAIModelStep: View {
             Spacer()
 
             // Skip option (always visible)
-            Button("Skip — the app works without AI features.") {
+            Button("Skip \u{2014} the app works without AI features.") {
                 cancelDownloadIfNeeded()
                 onSkip()
             }
@@ -77,6 +81,9 @@ struct OnboardingAIModelStep: View {
         }
         .padding(.horizontal, 32)
         .padding(.bottom, 40)
+        .task {
+            await loadRecommendedModel()
+        }
     }
 
     // MARK: - Download State View
@@ -94,14 +101,14 @@ struct OnboardingAIModelStep: View {
         case .downloading(let progress):
             VStack(spacing: 8) {
                 ProgressView(value: progress) {
-                    Text("Downloading…")
+                    Text("Downloading\u{2026}")
                         .font(.callout)
                 }
                 Text("\(Int(progress * 100))%")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Cancel") {
-                    downloadState = .notDownloaded
+                    cancelDownloadIfNeeded()
                 }
                 .font(.callout)
             }
@@ -109,7 +116,7 @@ struct OnboardingAIModelStep: View {
         case .verifying:
             VStack(spacing: 8) {
                 ProgressView()
-                Text("Verifying integrity…")
+                Text("Verifying integrity\u{2026}")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -134,28 +141,57 @@ struct OnboardingAIModelStep: View {
 
     // MARK: - Actions
 
-    /// PARTIAL SCOPE — V1 STUB: Simulates AI model download with progress.
-    /// Blocked on Data/AI/ layer (not yet built). Real implementation MUST:
-    /// - Use HTTPS with HTTP Range headers for resumable downloads (FR-SET-04)
-    /// - Perform SHA-256 integrity verification post-download (FR-OB-01 step 4)
-    /// - Clean up corrupted files on checksum mismatch
-    /// Tracked in: AI Model Management epic
-    private func startDownload() {
-        downloadState = .downloading(progress: 0)
-        Task {
-            for i in 1...10 {
-                try? await Task.sleep(for: .milliseconds(300))
-                if case .notDownloaded = downloadState { return } // Cancelled
-                downloadState = .downloading(progress: Double(i) / 10.0)
+    private func loadRecommendedModel() async {
+        let resolver = AIEngineResolver(modelManager: modelManager)
+        let recommendedID = resolver.recommendedModelID()
+        let models = await modelManager.availableModels()
+
+        if let model = models.first(where: { $0.id == recommendedID }) {
+            recommendedModel = model.info
+            if model.status == .downloaded {
+                downloadState = .downloaded
             }
-            downloadState = .verifying
-            try? await Task.sleep(for: .milliseconds(500))
-            downloadState = .downloaded
+        } else {
+            recommendedModel = models.first?.info
+        }
+    }
+
+    /// Download the recommended AI model with real progress tracking.
+    ///
+    /// Uses ModelManager for HTTPS download with HTTP Range resume support,
+    /// SHA-256 integrity verification, and corrupt file cleanup.
+    private func startDownload() {
+        guard let model = recommendedModel else { return }
+
+        downloadState = .downloading(progress: 0)
+        downloadProgress = 0
+
+        Task {
+            do {
+                try await modelManager.downloadModel(id: model.id) { progress in
+                    Task { @MainActor in
+                        self.downloadProgress = progress
+                        self.downloadState = .downloading(progress: progress)
+                    }
+                }
+                downloadState = .downloaded
+            } catch {
+                if case AIEngineError.downloadCancelled = error {
+                    downloadState = .notDownloaded
+                } else {
+                    downloadState = .failed(error.localizedDescription)
+                }
+            }
         }
     }
 
     private func cancelDownloadIfNeeded() {
         if case .downloading = downloadState {
+            if let model = recommendedModel {
+                Task {
+                    await modelManager.cancelDownload(id: model.id)
+                }
+            }
             downloadState = .notDownloaded
         }
     }
@@ -171,5 +207,5 @@ enum AIDownloadState {
 }
 
 #Preview("Not Downloaded") {
-    OnboardingAIModelStep(onNext: {}, onSkip: {})
+    OnboardingAIModelStep(modelManager: ModelManager(), onNext: {}, onSkip: {})
 }

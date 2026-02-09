@@ -16,6 +16,7 @@ public struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     let manageAccounts: ManageAccountsUseCaseProtocol
+    let modelManager: ModelManager
 
     @State private var accounts: [Account] = []
     @State private var isAddingAccount = false
@@ -25,8 +26,9 @@ public struct SettingsView: View {
     @State private var errorMessage: String?
     @State private var notificationPermissionDenied = false
 
-    public init(manageAccounts: ManageAccountsUseCaseProtocol) {
+    public init(manageAccounts: ManageAccountsUseCaseProtocol, modelManager: ModelManager = ModelManager()) {
         self.manageAccounts = manageAccounts
+        self.modelManager = modelManager
     }
 
     public var body: some View {
@@ -142,7 +144,7 @@ public struct SettingsView: View {
     private var aiSection: some View {
         Section("AI Features") {
             NavigationLink("AI Model") {
-                AIModelSettingsView()
+                AIModelSettingsView(modelManager: modelManager)
             }
         }
     }

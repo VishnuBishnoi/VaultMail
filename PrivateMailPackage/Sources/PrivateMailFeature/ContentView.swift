@@ -36,6 +36,7 @@ public struct ContentView: View {
     let queryContacts: QueryContactsUseCaseProtocol
     let idleMonitor: IDLEMonitorUseCaseProtocol?
     let appLockManager: AppLockManager
+    let modelManager: ModelManager
 
     @State private var accounts: [Account] = []
     @State private var hasLoaded = false
@@ -52,7 +53,8 @@ public struct ContentView: View {
         composeEmail: ComposeEmailUseCaseProtocol,
         queryContacts: QueryContactsUseCaseProtocol,
         idleMonitor: IDLEMonitorUseCaseProtocol? = nil,
-        appLockManager: AppLockManager
+        appLockManager: AppLockManager,
+        modelManager: ModelManager = ModelManager()
     ) {
         self.manageAccounts = manageAccounts
         self.fetchThreads = fetchThreads
@@ -65,6 +67,7 @@ public struct ContentView: View {
         self.queryContacts = queryContacts
         self.idleMonitor = idleMonitor
         self.appLockManager = appLockManager
+        self.modelManager = modelManager
     }
 
     public var body: some View {
@@ -73,7 +76,7 @@ public struct ContentView: View {
                 if !hasLoaded {
                     ProgressView()
                 } else if accounts.isEmpty || !settings.isOnboardingComplete {
-                    OnboardingView(manageAccounts: manageAccounts, syncEmails: syncEmails)
+                    OnboardingView(manageAccounts: manageAccounts, syncEmails: syncEmails, modelManager: modelManager)
                 } else {
                     mainAppView
                 }
@@ -124,7 +127,8 @@ public struct ContentView: View {
             downloadAttachment: downloadAttachment,
             composeEmail: composeEmail,
             queryContacts: queryContacts,
-            idleMonitor: idleMonitor
+            idleMonitor: idleMonitor,
+            modelManager: modelManager
         )
         .environment(undoSendManager)
         .preferredColorScheme(settings.colorScheme)

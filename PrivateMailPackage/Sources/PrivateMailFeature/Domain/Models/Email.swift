@@ -56,6 +56,10 @@ public final class Email {
     public var aiCategory: String?
     /// AI-generated summary
     public var aiSummary: String?
+    /// Whether this email is flagged as spam/phishing by AI detection.
+    /// Never auto-deleted; displayed as visual warning only. User can override.
+    /// Spec ref: FR-AI-06
+    public var isSpam: Bool
     /// Email size in bytes
     public var sizeBytes: Int
     /// Send pipeline state (raw value of SendState)
@@ -102,6 +106,7 @@ public final class Email {
         isDeleted: Bool = false,
         aiCategory: String? = AICategory.uncategorized.rawValue,
         aiSummary: String? = nil,
+        isSpam: Bool = false,
         sizeBytes: Int = 0,
         sendState: String = SendState.none.rawValue,
         sendRetryCount: Int = 0,
@@ -130,6 +135,7 @@ public final class Email {
         self.isDeleted = isDeleted
         self.aiCategory = aiCategory
         self.aiSummary = aiSummary
+        self.isSpam = isSpam
         self.sizeBytes = sizeBytes
         self.sendState = sendState
         self.sendRetryCount = sendRetryCount

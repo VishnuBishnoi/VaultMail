@@ -18,6 +18,7 @@ struct PrivateMailApp: App {
     let queryContacts: QueryContactsUseCaseProtocol
     let idleMonitor: IDLEMonitorUseCaseProtocol
     let backgroundSyncScheduler: BackgroundSyncScheduler
+    let aiModelManager: ModelManager
 
     init() {
         do {
@@ -90,6 +91,8 @@ struct PrivateMailApp: App {
         )
         backgroundSyncScheduler.registerTasks()
         backgroundSyncScheduler.scheduleNextSync()
+
+        aiModelManager = ModelManager()
     }
 
     var body: some Scene {
@@ -105,7 +108,8 @@ struct PrivateMailApp: App {
                 composeEmail: composeEmail,
                 queryContacts: queryContacts,
                 idleMonitor: idleMonitor,
-                appLockManager: appLockManager
+                appLockManager: appLockManager,
+                modelManager: aiModelManager
             )
             .environment(settingsStore)
         }
@@ -113,7 +117,7 @@ struct PrivateMailApp: App {
 
         #if os(macOS)
         Settings {
-            SettingsView(manageAccounts: manageAccounts)
+            SettingsView(manageAccounts: manageAccounts, modelManager: aiModelManager)
                 .environment(settingsStore)
                 .modelContainer(modelContainer)
         }
