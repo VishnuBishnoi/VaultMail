@@ -17,6 +17,7 @@ public struct ComposerView: View {
     let queryContacts: QueryContactsUseCaseProtocol
     let smartReply: SmartReplyUseCaseProtocol
     let mode: ComposerMode
+    let accounts: [Account]
     let onDismiss: @MainActor (ComposerDismissResult) -> Void
 
     @Environment(SettingsStore.self) private var settings
@@ -76,15 +77,17 @@ public struct ComposerView: View {
         return bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The Account matching the current composition mode.
+    private var fromAccount: Account? {
+        accounts.first { $0.id == mode.accountId }
+    }
+
     /// Whether the send button should be enabled.
     private var canSend: Bool {
         let allRecipients = toRecipients + ccRecipients + bccRecipients
-        let hasValidRecipient = allRecipients.contains { $0.isValid }
-        let hasAnyRecipient = !allRecipients.isEmpty
-        let allValid = allRecipients.allSatisfy { $0.isValid }
+        let hasRecipient = !allRecipients.isEmpty
         let notOverSize = totalAttachmentMB < AppConstants.maxAttachmentSizeMB
-        return hasValidRecipient && hasAnyRecipient && allValid && notOverSize &&
-               viewState == .composing
+        return hasRecipient && notOverSize && viewState == .composing
     }
 
     /// Total attachment size in MB.
@@ -262,9 +265,22 @@ public struct ComposerView: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 36, alignment: .leading)
 
-            Text(mode.accountId)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
+            if let account = fromAccount {
+                VStack(alignment: .leading, spacing: 1) {
+                    if !account.displayName.isEmpty {
+                        Text(account.displayName)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                    }
+                    Text(account.email)
+                        .font(account.displayName.isEmpty ? .subheadline : .caption)
+                        .foregroundStyle(account.displayName.isEmpty ? .primary : .secondary)
+                }
+            } else {
+                Text(mode.accountId)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+            }
 
             Spacer()
         }
@@ -344,7 +360,7 @@ public struct ComposerView: View {
 
     private func prefillFromMode() async {
         // Get the user's email for self-deduplication in reply-all
-        let userEmail = mode.accountId  // Account ID is the email in this app
+        let userEmail = fromAccount?.email ?? mode.accountId
 
         let prefill = composeEmail.buildPrefill(mode: mode, userEmail: userEmail)
 
@@ -559,7 +575,8 @@ public struct ComposerView: View {
         composeEmail: PreviewComposeEmailUseCase(),
         queryContacts: PreviewQueryContactsUseCaseForComposer(),
         smartReply: PreviewSmartReplyUseCase(),
-        mode: .new(accountId: "user@gmail.com"),
+        mode: .new(accountId: "preview-acc"),
+        accounts: [Account(id: "preview-acc", email: "user@gmail.com", displayName: "Preview User")],
         onDismiss: { _ in }
     )
     .environment(SettingsStore())

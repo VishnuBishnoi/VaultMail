@@ -63,7 +63,22 @@ struct RecipientFieldView: View {
                 .onSubmit {
                     commitCurrentInput()
                 }
+                .onChange(of: isInputFocused) { _, focused in
+                    if !focused {
+                        commitCurrentInput()
+                    }
+                }
                 .onChange(of: inputText) { _, newValue in
+                    // Auto-commit on comma or space separator
+                    if newValue.hasSuffix(",") || newValue.hasSuffix(" ") {
+                        let cleaned = String(newValue.dropLast())
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !cleaned.isEmpty {
+                            inputText = cleaned
+                            commitCurrentInput()
+                            return
+                        }
+                    }
                     Task { await fetchSuggestions(prefix: newValue) }
                 }
                 .accessibilityLabel("\(label) recipient field")

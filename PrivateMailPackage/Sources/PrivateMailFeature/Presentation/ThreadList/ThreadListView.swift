@@ -179,6 +179,7 @@ struct ThreadListView: View {
                     queryContacts: queryContacts,
                     smartReply: SmartReplyUseCase(),
                     mode: mode,
+                    accounts: accounts,
                     onDismiss: { result in
                         composerMode = nil
                         handleComposerDismiss(result)

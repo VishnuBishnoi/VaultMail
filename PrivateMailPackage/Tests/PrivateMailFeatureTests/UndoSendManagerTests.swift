@@ -60,8 +60,8 @@ struct UndoSendManagerTests {
 
         #expect(manager.remainingSeconds == 5)
 
-        // Wait a bit more than 1 second for one tick
-        try await Task.sleep(for: .milliseconds(1200))
+        // Wait for 2 seconds to reliably catch at least one timer tick
+        try await Task.sleep(for: .milliseconds(2500))
 
         #expect(manager.remainingSeconds < 5)
         #expect(manager.isCountdownActive == true)

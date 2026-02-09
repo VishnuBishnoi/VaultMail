@@ -10,7 +10,15 @@ struct ComposeEmailUseCaseTests {
 
     private static func makeSUT() -> (ComposeEmailUseCase, MockEmailRepository) {
         let repo = MockEmailRepository()
-        let useCase = ComposeEmailUseCase(repository: repo)
+        let accountRepo = MockAccountRepository()
+        let keychainManager = MockKeychainManager()
+        let smtpClient = MockSMTPClient()
+        let useCase = ComposeEmailUseCase(
+            repository: repo,
+            accountRepository: accountRepo,
+            keychainManager: keychainManager,
+            smtpClient: smtpClient
+        )
         return (useCase, repo)
     }
 

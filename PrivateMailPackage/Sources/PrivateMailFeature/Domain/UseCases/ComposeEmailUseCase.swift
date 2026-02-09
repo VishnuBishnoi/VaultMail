@@ -33,7 +33,7 @@ public protocol ComposeEmailUseCaseProtocol {
 
     /// Execute the actual send after undo window expires.
     /// Transitions .queued → .sending → .sent (or .failed).
-    /// STUBBED: simulates SMTP with Task.sleep.
+    /// Connects to SMTP, encodes MIME message, and transmits.
     func executeSend(emailId: String) async throws
 
     /// Delete a draft email.
@@ -43,16 +43,28 @@ public protocol ComposeEmailUseCaseProtocol {
 /// Default implementation of `ComposeEmailUseCaseProtocol`.
 ///
 /// Each method delegates to `EmailRepositoryProtocol` and maps errors
-/// to `ComposerError`.
+/// to `ComposerError`. The `executeSend` method connects to SMTP via
+/// `SMTPClientProtocol` and transmits the MIME-encoded message.
 ///
 /// Spec ref: Email Composer spec FR-COMP-01, FR-COMP-02
 @MainActor
 public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
 
     private let repository: EmailRepositoryProtocol
+    private let accountRepository: AccountRepositoryProtocol
+    private let keychainManager: KeychainManagerProtocol
+    private let smtpClient: SMTPClientProtocol
 
-    public init(repository: EmailRepositoryProtocol) {
+    public init(
+        repository: EmailRepositoryProtocol,
+        accountRepository: AccountRepositoryProtocol,
+        keychainManager: KeychainManagerProtocol,
+        smtpClient: SMTPClientProtocol
+    ) {
         self.repository = repository
+        self.accountRepository = accountRepository
+        self.keychainManager = keychainManager
+        self.smtpClient = smtpClient
     }
 
     // MARK: - Build Prefill
@@ -205,8 +217,100 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
             email.sendState = SendState.sending.rawValue
             try await repository.saveEmail(email)
 
-            // STUB: Simulate SMTP send
-            try await Task.sleep(for: .seconds(1))
+            // Look up the account to get SMTP settings and email
+            let accounts = try await accountRepository.getAccounts()
+            guard let account = accounts.first(where: { $0.id == email.accountId }) else {
+                email.sendState = SendState.failed.rawValue
+                try await repository.saveEmail(email)
+                throw ComposerError.sendFailed("Account not found for email")
+            }
+
+            // Get OAuth access token from Keychain
+            guard let token = try await keychainManager.retrieve(for: account.id) else {
+                email.sendState = SendState.failed.rawValue
+                try await repository.saveEmail(email)
+                throw ComposerError.sendFailed("No OAuth token found. Please re-authenticate.")
+            }
+
+            let accessToken: String
+            if token.isExpired || token.isNearExpiry {
+                // Try to refresh the token
+                do {
+                    let refreshed = try await accountRepository.refreshToken(for: account.id)
+                    accessToken = refreshed.accessToken
+                } catch {
+                    email.sendState = SendState.failed.rawValue
+                    try await repository.saveEmail(email)
+                    throw ComposerError.sendFailed("Token refresh failed: \(error.localizedDescription)")
+                }
+            } else {
+                accessToken = token.accessToken
+            }
+
+            // Decode recipient addresses
+            let toAddresses = decodeAddresses(email.toAddresses)
+            let ccAddresses = decodeAddresses(email.ccAddresses ?? "[]")
+            let bccAddresses = decodeAddresses(email.bccAddresses ?? "[]")
+            let allRecipients = toAddresses + ccAddresses + bccAddresses
+
+            guard !allRecipients.isEmpty else {
+                email.sendState = SendState.failed.rawValue
+                try await repository.saveEmail(email)
+                throw ComposerError.sendFailed("No recipients specified")
+            }
+
+            // Set from address on the email
+            email.fromAddress = account.email
+            email.fromName = account.displayName.isEmpty ? nil : account.displayName
+
+            // Build MIME message
+            let messageData = MIMEEncoder.encode(
+                from: account.email,
+                fromName: account.displayName.isEmpty ? nil : account.displayName,
+                toAddresses: toAddresses,
+                ccAddresses: ccAddresses,
+                bccAddresses: bccAddresses,
+                subject: email.subject,
+                bodyPlain: email.bodyPlain ?? "",
+                bodyHTML: email.bodyHTML,
+                messageId: email.messageId,
+                inReplyTo: email.inReplyTo,
+                references: email.references,
+                date: Date()
+            )
+
+            // Connect to SMTP and send
+            do {
+                try await smtpClient.connect(
+                    host: account.smtpHost,
+                    port: account.smtpPort,
+                    email: account.email,
+                    accessToken: accessToken
+                )
+
+                try await smtpClient.sendMessage(
+                    from: account.email,
+                    recipients: allRecipients,
+                    messageData: messageData
+                )
+
+                await smtpClient.disconnect()
+            } catch {
+                await smtpClient.disconnect()
+
+                // Retry logic
+                email.sendRetryCount += 1
+                if email.sendRetryCount >= AppConstants.maxSendRetryCount {
+                    email.sendState = SendState.failed.rawValue
+                    try await repository.saveEmail(email)
+                    throw ComposerError.sendFailed("Send failed after \(AppConstants.maxSendRetryCount) retries: \(error.localizedDescription)")
+                } else {
+                    // Re-queue for retry
+                    email.sendState = SendState.queued.rawValue
+                    try await repository.saveEmail(email)
+                    throw ComposerError.sendFailed("Send failed, will retry: \(error.localizedDescription)")
+                }
+            }
 
             // Transition to sent
             email.sendState = SendState.sent.rawValue
