@@ -24,14 +24,9 @@ struct AttachmentPickerView: View {
         attachments.reduce(0) { $0 + $1.sizeBytes }
     }
 
-    /// Total attachment size in MB.
-    private var totalSizeMB: Int {
-        totalSizeBytes / (1024 * 1024)
-    }
-
-    /// Whether total size exceeds the limit.
+    /// Whether total size exceeds the limit (strictly greater than max).
     private var isOverLimit: Bool {
-        totalSizeMB >= AppConstants.maxAttachmentSizeMB
+        totalSizeBytes > AppConstants.maxAttachmentSizeMB * 1024 * 1024
     }
 
     var body: some View {

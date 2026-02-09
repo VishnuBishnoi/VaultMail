@@ -87,7 +87,7 @@ public struct ComposerView: View {
         let allRecipients = toRecipients + ccRecipients + bccRecipients
         let hasRecipient = !allRecipients.isEmpty
         let maxBytes = AppConstants.maxAttachmentSizeMB * 1024 * 1024
-        let notOverSize = totalAttachmentBytes < maxBytes
+        let notOverSize = totalAttachmentBytes <= maxBytes
         return hasRecipient && notOverSize && viewState == .composing
     }
 
