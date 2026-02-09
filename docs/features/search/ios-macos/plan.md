@@ -15,7 +15,7 @@ target-milestone: V1.0
 
 ## 1. Scope
 
-This plan covers the search UI and integration with the semantic + exact search backend. The embedding engine, vector store, and index manager are implemented in AI Features tasks (IOS-A-14 through IOS-A-18); this plan covers the search-specific UI and use case integration.
+This plan covers the search UI and integration with the semantic + exact search backend. The embedding engine, vector store, index manager, and search use case are implemented in AI Features tasks (IOS-A-14 through IOS-A-17); this plan covers the search-specific UI task (IOS-A-18).
 
 ---
 

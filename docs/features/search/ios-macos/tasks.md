@@ -15,17 +15,24 @@ updated: 2025-02-07
 
 ---
 
-### IOS-A-14 to IOS-A-18: Semantic Search Pipeline
+### IOS-A-14 to IOS-A-17: Semantic Search Backend (tracked in AI Features tasks)
+
+> These backend tasks are defined and tracked in `docs/features/ai-features/ios-macos/tasks.md`. See that file for full deliverables, status, and spec refs.
+
+| Task ID | Description | Tracked In |
+|---------|-------------|------------|
+| IOS-A-14 | `VectorStore` — embedding storage + cosine similarity | AI Features tasks |
+| IOS-A-15 | `SearchIndexManager` — incremental index build during sync | AI Features tasks |
+| IOS-A-16 | `GenerateEmbeddingUseCase` — batch embeddings via CoreML | AI Features tasks |
+| IOS-A-17 | `SearchEmailsUseCase` — semantic + exact combined search | AI Features tasks |
+
+### IOS-A-18: Search UI
 
 - **Status**: `todo`
-- **Spec ref**: Search spec, FR-SEARCH-01, FR-SEARCH-02, FR-SEARCH-03; AI Features spec, FR-AI-05
+- **Spec ref**: Search spec, FR-SEARCH-01, FR-SEARCH-02, FR-SEARCH-03
 - **Validation ref**: AC-A-07
-- **Description**: End-to-end semantic search from indexing to UI.
+- **Description**: Search bar, results display, and filters. Depends on backend tasks IOS-A-14..17.
 - **Deliverables**:
-  - [ ] `EmbeddingEngine.swift` — generate embeddings from text
-  - [ ] `VectorStore.swift` — store and query embeddings
-  - [ ] `SearchIndexManager.swift` — build and incrementally update index
-  - [ ] `SearchEmailsUseCase.swift` — semantic + exact combined search
   - [ ] `SearchView.swift` — search bar, results, filters
   - [ ] `SearchViewModel.swift`
   - [ ] Recent searches persistence
