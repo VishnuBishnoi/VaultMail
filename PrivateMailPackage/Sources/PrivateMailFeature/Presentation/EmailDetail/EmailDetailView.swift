@@ -26,6 +26,9 @@ public struct EmailDetailView: View {
     let downloadAttachment: DownloadAttachmentUseCaseProtocol
     let summarizeThread: SummarizeThreadUseCaseProtocol?
     let smartReply: SmartReplyUseCaseProtocol?
+    let composeEmail: ComposeEmailUseCaseProtocol?
+    let queryContacts: QueryContactsUseCaseProtocol?
+    let accounts: [Account]
 
     // MARK: - View State
 
@@ -66,6 +69,10 @@ public struct EmailDetailView: View {
     @State private var showUndoToast = false
     @State private var undoTask: Task<Void, Never>?
     @State private var errorToast: String?
+
+    // MARK: - Composer State
+
+    @State private var composerMode: ComposerMode?
 
     // MARK: - Attachment Preview
 
@@ -139,6 +146,18 @@ public struct EmailDetailView: View {
             }
         }
         #endif
+        .sheet(item: $composerMode) { mode in
+            if let composeEmail, let queryContacts {
+                ComposerView(
+                    composeEmail: composeEmail,
+                    queryContacts: queryContacts,
+                    smartReply: SmartReplyUseCase(aiRepository: StubAIRepository()),
+                    mode: mode,
+                    accounts: accounts,
+                    onDismiss: { _ in composerMode = nil }
+                )
+            }
+        }
     }
 
     // MARK: - Loading View
@@ -197,8 +216,8 @@ public struct EmailDetailView: View {
                     if !smartReplySuggestions.isEmpty {
                         SmartReplyView(
                             suggestions: smartReplySuggestions,
-                            onTap: { suggestion in
-                                // TODO: Navigate to composer with pre-filled text
+                            onTap: { _ in
+                                openComposer { .reply(email: $0) }
                             }
                         )
                         .padding(.horizontal)
@@ -298,6 +317,18 @@ public struct EmailDetailView: View {
         .accessibilityLabel("Show earlier messages in this conversation")
     }
 
+    // MARK: - Composer Navigation
+
+    /// Open the composer for the latest email in the thread.
+    ///
+    /// Converts the latest `Email` to a `ComposerEmailContext` snapshot
+    /// and sets `composerMode` to trigger the sheet.
+    private func openComposer(mode: (ComposerEmailContext) -> ComposerMode) {
+        guard let email = sortedEmails.last else { return }
+        let context = ComposerEmailContext(from: email)
+        composerMode = mode(context)
+    }
+
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
@@ -305,7 +336,7 @@ public struct EmailDetailView: View {
         #if os(iOS)
         ToolbarItemGroup(placement: .bottomBar) {
             Button {
-                // TODO: Navigate to composer — Reply
+                openComposer { .reply(email: $0) }
             } label: {
                 Image(systemName: "arrowshape.turn.up.left")
             }
@@ -314,7 +345,7 @@ public struct EmailDetailView: View {
             Spacer()
 
             Button {
-                // TODO: Navigate to composer — Reply All
+                openComposer { .replyAll(email: $0) }
             } label: {
                 Image(systemName: "arrowshape.turn.up.left.2")
             }
@@ -323,7 +354,7 @@ public struct EmailDetailView: View {
             Spacer()
 
             Button {
-                // TODO: Navigate to composer — Forward
+                openComposer { .forward(email: $0) }
             } label: {
                 Image(systemName: "arrowshape.turn.up.right")
             }
@@ -357,7 +388,7 @@ public struct EmailDetailView: View {
         #else
         ToolbarItemGroup(placement: .automatic) {
             Button {
-                // TODO: Navigate to composer — Reply
+                openComposer { .reply(email: $0) }
             } label: {
                 Image(systemName: "arrowshape.turn.up.left")
             }

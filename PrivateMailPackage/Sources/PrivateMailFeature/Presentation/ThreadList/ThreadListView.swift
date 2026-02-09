@@ -301,7 +301,10 @@ struct ThreadListView: View {
                 manageThreadActions: manageThreadActions,
                 downloadAttachment: downloadAttachment,
                 summarizeThread: nil,
-                smartReply: nil
+                smartReply: nil,
+                composeEmail: composeEmail,
+                queryContacts: queryContacts,
+                accounts: accounts
             )
         }
         .accessibilityLabel("Email threads")
