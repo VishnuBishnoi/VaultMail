@@ -109,6 +109,32 @@ public struct ComposerEmailContext: Sendable, Equatable {
         self.isDraft = isDraft
         self.attachmentIds = attachmentIds
     }
+
+    /// Convenience initializer to create a context snapshot from a SwiftData Email model.
+    ///
+    /// Email @Model objects are not Sendable, so this creates a lightweight
+    /// Sendable copy for the composer to use across concurrency boundaries.
+    public init(from email: Email) {
+        self.init(
+            emailId: email.id,
+            accountId: email.accountId,
+            threadId: email.threadId,
+            messageId: email.messageId,
+            inReplyTo: email.inReplyTo,
+            references: email.references,
+            fromAddress: email.fromAddress,
+            fromName: email.fromName,
+            toAddresses: email.toAddresses,
+            ccAddresses: email.ccAddresses,
+            bccAddresses: email.bccAddresses,
+            subject: email.subject,
+            bodyPlain: email.bodyPlain,
+            bodyHTML: email.bodyHTML,
+            dateSent: email.dateSent,
+            isDraft: email.isDraft,
+            attachmentIds: email.attachments.map(\.id)
+        )
+    }
 }
 
 /// Pre-filled composer fields based on composition mode.
