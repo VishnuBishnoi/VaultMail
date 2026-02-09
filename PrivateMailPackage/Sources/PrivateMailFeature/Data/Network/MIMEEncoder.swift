@@ -234,14 +234,21 @@ enum MIMEEncoder {
 
     // MARK: - Date Formatting
 
-    /// Formats a date per RFC 5322 §3.3.
-    /// Example: "Mon, 14 Nov 2023 10:30:00 +0000"
-    private static func formatRFC5322Date(_ date: Date) -> String {
+    /// Cached formatter for RFC 5322 dates.
+    /// `DateFormatter` init is expensive; reusing a single instance avoids
+    /// allocating one per email (review comment #7).
+    private static let rfc5322Formatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone.current
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    /// Formats a date per RFC 5322 §3.3.
+    /// Example: "Mon, 14 Nov 2023 10:30:00 +0000"
+    private static func formatRFC5322Date(_ date: Date) -> String {
+        rfc5322Formatter.string(from: date)
     }
 
     // MARK: - Address Formatting

@@ -141,6 +141,9 @@ public protocol EmailRepositoryProtocol {
     /// Fetch a single email by ID.
     func getEmail(id: String) async throws -> Email?
 
+    /// Fetch emails matching a given send state.
+    func getEmailsBySendState(_ state: String) async throws -> [Email]
+
     // MARK: - Contact Cache (FR-COMP-04)
 
     /// Query cached contacts matching a prefix, sorted by frequency.

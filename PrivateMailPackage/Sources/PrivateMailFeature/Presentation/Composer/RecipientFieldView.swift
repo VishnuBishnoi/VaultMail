@@ -17,6 +17,7 @@ struct RecipientFieldView: View {
     @State private var inputText: String = ""
     @State private var suggestions: [ContactCacheEntry] = []
     @State private var showSuggestions = false
+    @State private var suggestionTask: Task<Void, Never>?
     @FocusState private var isInputFocused: Bool
 
     var body: some View {
@@ -81,7 +82,13 @@ struct RecipientFieldView: View {
                             return
                         }
                     }
-                    Task { await fetchSuggestions(prefix: newValue) }
+                    // Cancel any in-flight query and debounce by 250 ms
+                    suggestionTask?.cancel()
+                    suggestionTask = Task {
+                        try? await Task.sleep(for: .milliseconds(250))
+                        guard !Task.isCancelled else { return }
+                        await fetchSuggestions(prefix: newValue)
+                    }
                 }
                 .accessibilityLabel("\(label) recipient field")
         }

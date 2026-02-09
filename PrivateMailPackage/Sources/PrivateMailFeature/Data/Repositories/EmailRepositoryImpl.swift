@@ -681,6 +681,14 @@ public final class EmailRepositoryImpl: EmailRepositoryProtocol {
         return try context.fetch(descriptor).first
     }
 
+    public func getEmailsBySendState(_ state: String) async throws -> [Email] {
+        let sendState = state
+        let descriptor = FetchDescriptor<Email>(
+            predicate: #Predicate { $0.sendState == sendState }
+        )
+        return try context.fetch(descriptor)
+    }
+
     // MARK: - Contact Cache (FR-COMP-04)
 
     public func queryContacts(accountId: String, prefix: String, limit: Int) async throws -> [ContactCacheEntry] {

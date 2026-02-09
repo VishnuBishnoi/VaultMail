@@ -240,11 +240,9 @@ public struct ComposerView: View {
                         .background(.red, in: RoundedRectangle(cornerRadius: 8))
                         .padding()
                         .transition(.move(edge: .bottom))
-                        .onAppear {
-                            Task {
-                                try? await Task.sleep(for: .seconds(3))
-                                self.errorMessage = nil
-                            }
+                        .task {
+                            try? await Task.sleep(for: .seconds(3))
+                            self.errorMessage = nil
                         }
                 }
             }
@@ -503,6 +501,9 @@ public struct ComposerView: View {
             // Queue for sending
             try await composeEmail.queueForSending(emailId: emailId)
 
+            // Clean up temp attachment files now that they've been read
+            AttachmentPickerView.cleanupTempAttachments()
+
             // Dismiss and notify parent to start undo countdown
             onDismiss(.sent(emailId: emailId))
             dismiss()
@@ -528,6 +529,8 @@ public struct ComposerView: View {
         if let draftId {
             try? await composeEmail.deleteDraft(emailId: draftId)
         }
+        // Clean up temp attachment files
+        AttachmentPickerView.cleanupTempAttachments()
         onDismiss(.discarded)
         dismiss()
     }
@@ -597,6 +600,7 @@ private final class PreviewComposeEmailUseCase: ComposeEmailUseCaseProtocol {
     func undoSend(emailId: String) async throws {}
     func executeSend(emailId: String) async throws {}
     func deleteDraft(emailId: String) async throws {}
+    func recoverStuckSendingEmails() async {}
 }
 
 @MainActor

@@ -356,6 +356,11 @@ final class MockEmailRepository: EmailRepositoryProtocol {
         return emails.first { $0.id == id }
     }
 
+    func getEmailsBySendState(_ state: String) async throws -> [Email] {
+        if let error = errorToThrow { throw error }
+        return emails.filter { $0.sendState == state }
+    }
+
     // MARK: - Contact Cache (FR-COMP-04)
 
     var contactEntries: [ContactCacheEntry] = []

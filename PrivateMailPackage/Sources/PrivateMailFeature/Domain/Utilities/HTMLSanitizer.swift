@@ -100,6 +100,7 @@ public enum HTMLSanitizer {
         <html>\
         <head>\
         <meta name="viewport" content="width=device-width, initial-scale=1.0">\
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data:;">\
         <style>\
         body{\
         font-size:\(sizeString)pt;\

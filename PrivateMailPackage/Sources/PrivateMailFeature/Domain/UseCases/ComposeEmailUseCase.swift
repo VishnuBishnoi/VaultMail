@@ -39,6 +39,10 @@ public protocol ComposeEmailUseCaseProtocol {
 
     /// Delete a draft email.
     func deleteDraft(emailId: String) async throws
+
+    /// Recover emails stuck in `.sending` state after a crash.
+    /// Transitions them to `.failed` so the user can retry.
+    func recoverStuckSendingEmails() async
 }
 
 /// Default implementation of `ComposeEmailUseCaseProtocol`.
@@ -300,41 +304,70 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
             email.fromAddress = account.email
             email.fromName = account.displayName.isEmpty ? nil : account.displayName
 
-            // Load attachment data from local files
-            var attachmentDataList: [MIMEEncoder.AttachmentData] = []
-            for attachment in email.attachments {
-                guard let localPath = attachment.localPath else { continue }
-                let fileURL = URL(fileURLWithPath: localPath)
-                guard let fileData = try? Data(contentsOf: fileURL) else {
-                    email.sendState = SendState.failed.rawValue
-                    try await repository.saveEmail(email)
-                    throw ComposerError.sendFailed(
-                        "Could not read attachment \"\(attachment.filename)\". Please re-add it and try again."
-                    )
-                }
-                attachmentDataList.append(MIMEEncoder.AttachmentData(
-                    filename: attachment.filename,
-                    mimeType: attachment.mimeType,
-                    data: fileData
-                ))
+            // Snapshot values needed for off-main-actor work so we
+            // don't access SwiftData objects from a non-isolated context.
+            struct AttachmentRef: Sendable {
+                let filename: String
+                let mimeType: String
+                let localPath: String?
             }
+            let attachmentRefs = email.attachments.map {
+                AttachmentRef(filename: $0.filename, mimeType: $0.mimeType, localPath: $0.localPath)
+            }
+            let fromEmail = account.email
+            let fromName = account.displayName.isEmpty ? nil : account.displayName
+            let subjectText = email.subject
+            let bodyPlainText = email.bodyPlain ?? ""
+            let bodyHTMLText = email.bodyHTML
+            let messageIdText = email.messageId
+            let inReplyToText = email.inReplyTo
+            let referencesText = email.references
+            let sendDate = Date()
 
-            // Build MIME message
-            let messageData = MIMEEncoder.encode(
-                from: account.email,
-                fromName: account.displayName.isEmpty ? nil : account.displayName,
-                toAddresses: toAddresses,
-                ccAddresses: ccAddresses,
-                bccAddresses: bccAddresses,
-                subject: email.subject,
-                bodyPlain: email.bodyPlain ?? "",
-                bodyHTML: email.bodyHTML,
-                messageId: email.messageId,
-                inReplyTo: email.inReplyTo,
-                references: email.references,
-                date: Date(),
-                attachments: attachmentDataList
-            )
+            // Move file I/O and MIME encoding off the main actor to
+            // avoid blocking the UI thread (review comment #4).
+            let messageData: Data
+            do {
+                messageData = try await Task.detached(priority: .userInitiated) {
+                    // Load attachment data from local files
+                    var attachmentDataList: [MIMEEncoder.AttachmentData] = []
+                    for ref in attachmentRefs {
+                        guard let localPath = ref.localPath else { continue }
+                        let fileURL = URL(fileURLWithPath: localPath)
+                        guard let fileData = try? Data(contentsOf: fileURL) else {
+                            throw ComposerError.sendFailed(
+                                "Could not read attachment \"\(ref.filename)\". Please re-add it and try again."
+                            )
+                        }
+                        attachmentDataList.append(MIMEEncoder.AttachmentData(
+                            filename: ref.filename,
+                            mimeType: ref.mimeType,
+                            data: fileData
+                        ))
+                    }
+
+                    // Build MIME message
+                    return MIMEEncoder.encode(
+                        from: fromEmail,
+                        fromName: fromName,
+                        toAddresses: toAddresses,
+                        ccAddresses: ccAddresses,
+                        bccAddresses: bccAddresses,
+                        subject: subjectText,
+                        bodyPlain: bodyPlainText,
+                        bodyHTML: bodyHTMLText,
+                        messageId: messageIdText,
+                        inReplyTo: inReplyToText,
+                        references: referencesText,
+                        date: sendDate,
+                        attachments: attachmentDataList
+                    )
+                }.value
+            } catch {
+                email.sendState = SendState.failed.rawValue
+                try await repository.saveEmail(email)
+                throw error
+            }
 
             // Connect to SMTP and send
             do {
@@ -414,6 +447,24 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
             try await repository.deleteEmail(id: emailId)
         } catch {
             throw ComposerError.deleteDraftFailed(error.localizedDescription)
+        }
+    }
+
+    /// Recovers emails orphaned in `.sending` state (e.g., after a crash).
+    ///
+    /// On app launch, any email still marked `.sending` never completed its
+    /// SMTP transaction — transition them to `.failed` so the user can retry
+    /// or discard.
+    public func recoverStuckSendingEmails() async {
+        do {
+            let stuck = try await repository.getEmailsBySendState(SendState.sending.rawValue)
+            for email in stuck {
+                email.sendState = SendState.failed.rawValue
+                try await repository.saveEmail(email)
+                NSLog("[ComposeEmail] Recovered stuck email \(email.id) from .sending → .failed")
+            }
+        } catch {
+            NSLog("[ComposeEmail] Failed to recover stuck emails: \(error)")
         }
     }
 

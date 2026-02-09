@@ -44,21 +44,15 @@ public actor SMTPClient: SMTPClientProtocol {
                 try await session.authenticateXOAUTH2(email: email, accessToken: accessToken)
                 _isConnected = true
                 return
-            } catch let error as SMTPError {
+            } catch {
                 lastError = error
 
                 // Don't retry auth failures — they won't resolve with retries
-                if case .authenticationFailed = error {
+                if let smtpError = error as? SMTPError,
+                   case .authenticationFailed = smtpError {
                     throw error
                 }
 
-                if attempt < AppConstants.imapMaxRetries {
-                    let delay = AppConstants.imapRetryBaseDelay * pow(3.0, Double(attempt))
-                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                    await session.disconnect()
-                }
-            } catch {
-                lastError = error
                 if attempt < AppConstants.imapMaxRetries {
                     let delay = AppConstants.imapRetryBaseDelay * pow(3.0, Double(attempt))
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))

@@ -609,19 +609,15 @@ public struct EmailDetailView: View {
 
     private func archiveThread() async {
         guard let thread else { return }
-        let action = UndoableAction(
-            type: .archive,
-            threadId: thread.id,
-            message: "Conversation archived"
-        )
-        showUndoAndSchedule(action)
 
+        // Perform the action immediately and dismiss.
+        // The undo toast is unreachable once the view dismisses, so
+        // skip it for now (V1) — future work can surface undo in the
+        // parent ThreadListView via a callback.
         do {
             try await manageThreadActions.archiveThread(id: thread.id)
-            // Navigate back after action
             dismiss()
         } catch {
-            cancelUndo()
             withAnimation {
                 errorToast = "Couldn't archive. Tap to retry."
             }
@@ -630,18 +626,11 @@ public struct EmailDetailView: View {
 
     private func deleteThread() async {
         guard let thread else { return }
-        let action = UndoableAction(
-            type: .delete,
-            threadId: thread.id,
-            message: "Conversation deleted"
-        )
-        showUndoAndSchedule(action)
 
         do {
             try await manageThreadActions.deleteThread(id: thread.id)
             dismiss()
         } catch {
-            cancelUndo()
             withAnimation {
                 errorToast = "Couldn't delete. Tap to retry."
             }

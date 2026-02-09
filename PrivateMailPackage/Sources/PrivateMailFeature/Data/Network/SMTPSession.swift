@@ -62,33 +62,51 @@ actor SMTPSession {
         let timeoutInterval = timeout
         let queue = connectionQueue
 
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            // Timeout guard
-            queue.asyncAfter(deadline: .now() + timeoutInterval) {
-                guard flag.trySet() else { return }
-                conn.cancel()
-                cont.resume(throwing: SMTPError.timeout)
-            }
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                    conn.stateUpdateHandler = { state in
+                        switch state {
+                        case .ready:
+                            guard flag.trySet() else { return }
+                            cont.resume()
+                        case .failed(let error):
+                            guard flag.trySet() else { return }
+                            cont.resume(throwing: SMTPError.connectionFailed(error.localizedDescription))
+                        case .cancelled:
+                            guard flag.trySet() else { return }
+                            cont.resume(throwing: SMTPError.operationCancelled)
+                        default:
+                            break
+                        }
+                    }
 
-            conn.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    guard flag.trySet() else { return }
-                    cont.resume()
-                case .failed(let error):
-                    guard flag.trySet() else { return }
-                    cont.resume(throwing: SMTPError.connectionFailed(error.localizedDescription))
-                case .cancelled:
-                    guard flag.trySet() else { return }
-                    cont.resume(throwing: SMTPError.operationCancelled)
-                default:
-                    break
+                    conn.start(queue: queue)
                 }
             }
 
-            conn.start(queue: queue)
+            // Timeout task — fires if connection takes too long
+            group.addTask {
+                try await Task.sleep(for: .seconds(timeoutInterval))
+                guard flag.trySet() else { return }
+                conn.cancel()
+                throw SMTPError.timeout
+            }
+
+            // Wait for the first task to finish (connect or timeout),
+            // then cancel the remaining task.
+            do {
+                try await group.next()
+                group.cancelAll()
+            } catch {
+                group.cancelAll()
+                throw error
+            }
         }
 
+        // Clear stateUpdateHandler to avoid retain cycles and stale
+        // continuation references after the connection is established.
+        conn.stateUpdateHandler = nil
         self.connection = conn
 
         // Read server greeting (220 service ready)
@@ -297,26 +315,40 @@ actor SMTPSession {
         }
 
         let flag = SMTPAtomicFlag()
-        let queue = connectionQueue
         let effectiveTimeout = timeout
 
         let data: Data = try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { cont in
-                queue.asyncAfter(deadline: .now() + effectiveTimeout) {
-                    guard flag.trySet() else { return }
-                    cont.resume(throwing: SMTPError.timeout)
-                }
-
-                conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, _, error in
-                    guard flag.trySet() else { return }
-                    if let error {
-                        cont.resume(throwing: SMTPError.connectionFailed(error.localizedDescription))
-                    } else if let data, !data.isEmpty {
-                        cont.resume(returning: data)
-                    } else {
-                        cont.resume(throwing: SMTPError.connectionFailed("Connection closed by server"))
+            try await withThrowingTaskGroup(of: Data.self) { group in
+                // Receive task
+                group.addTask {
+                    try await withCheckedThrowingContinuation { cont in
+                        conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, _, error in
+                            guard flag.trySet() else { return }
+                            if let error {
+                                cont.resume(throwing: SMTPError.connectionFailed(error.localizedDescription))
+                            } else if let data, !data.isEmpty {
+                                cont.resume(returning: data)
+                            } else {
+                                cont.resume(throwing: SMTPError.connectionFailed("Connection closed by server"))
+                            }
+                        }
                     }
                 }
+
+                // Timeout task
+                group.addTask {
+                    try await Task.sleep(for: .seconds(effectiveTimeout))
+                    guard flag.trySet() else {
+                        throw CancellationError()
+                    }
+                    throw SMTPError.timeout
+                }
+
+                defer { group.cancelAll() }
+                guard let result = try await group.next() else {
+                    throw SMTPError.connectionFailed("No data received")
+                }
+                return result
             }
         } onCancel: {
             conn.cancel()

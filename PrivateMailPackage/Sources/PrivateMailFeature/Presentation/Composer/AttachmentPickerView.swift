@@ -192,10 +192,9 @@ struct AttachmentPickerView: View {
     /// Writes attachment data to a persistent temp directory.
     ///
     /// Returns the file path on success, nil on failure.
-    /// Files persist until the OS cleans the temp directory.
+    /// Files persist until explicitly cleaned via ``cleanupTempAttachments()``.
     private static func writeToTempDirectory(data: Data, filename: String) -> String? {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("attachments", isDirectory: true)
+        let dir = tempAttachmentsDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let fileURL = dir.appendingPathComponent(filename)
         do {
@@ -203,6 +202,25 @@ struct AttachmentPickerView: View {
             return fileURL.path
         } catch {
             return nil
+        }
+    }
+
+    /// The temp directory used for attachment staging.
+    static let tempAttachmentsDirectory: URL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("attachments", isDirectory: true)
+
+    /// Removes all files from the temp attachments directory.
+    ///
+    /// Call after a successful send or when the composer is dismissed
+    /// without sending to avoid unbounded disk growth.
+    static func cleanupTempAttachments() {
+        let dir = tempAttachmentsDirectory
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        for file in files {
+            try? FileManager.default.removeItem(at: file)
         }
     }
 
