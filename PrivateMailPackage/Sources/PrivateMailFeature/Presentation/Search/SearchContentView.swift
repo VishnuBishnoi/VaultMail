@@ -159,7 +159,8 @@ struct SearchContentView: View {
 
     @ViewBuilder
     private var searchResultsList: some View {
-        let resultMap = Dictionary(uniqueKeysWithValues: searchResults.map { ($0.threadId, $0) })
+        // First-wins: keep highest-scored result per thread (results are pre-sorted by score)
+        let resultMap = Dictionary(searchResults.map { ($0.threadId, $0) }, uniquingKeysWith: { first, _ in first })
         List(threads, id: \.id) { thread in
             NavigationLink(value: thread.id) {
                 if let result = resultMap[thread.id], !searchText.isEmpty {
