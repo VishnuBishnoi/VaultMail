@@ -2,7 +2,7 @@
 title: "Search — iOS/macOS Task Breakdown"
 platform: iOS, macOS
 plan-ref: docs/features/search/ios-macos/plan.md
-version: "1.1.0"
+version: "2.0.0"
 status: draft
 updated: 2026-02-10
 ---
@@ -13,40 +13,179 @@ updated: 2026-02-10
 
 > **This is the only unlocked feature.** All other features (email sync, composer, AI phases 1–3+5, polish, macOS adaptation) are complete and locked. Search is the remaining major work item.
 
-> Note: Backend tasks IOS-A-14 through IOS-A-17 (embedding engine, vector store, search index manager, search use case) are tracked in the AI Features task file. This file tracks the search-specific UI task.
-
 ---
-
-### IOS-A-14 to IOS-A-17: Semantic Search Backend (tracked in AI Features tasks)
-
-> These backend tasks are defined and tracked in `docs/features/ai-features/ios-macos/tasks.md`. See that file for full deliverables, status, and spec refs.
-
-| Task ID | Description | Status | Tracked In |
-|---------|-------------|--------|------------|
-| IOS-A-01b | CoreML Model Bundling (DistilBERT + MiniLM) | `todo` | AI Features tasks |
-| IOS-A-02b | CoreMLClassifier wrapper | `todo` | AI Features tasks |
-| IOS-A-14 | `VectorStore` — embedding storage + cosine similarity | `todo` | AI Features tasks |
-| IOS-A-15 | `SearchIndexManager` — incremental index build during sync | `todo` | AI Features tasks |
-| IOS-A-16 | `GenerateEmbeddingUseCase` — batch embeddings via CoreML | `todo` | AI Features tasks |
-| IOS-A-17 | `SearchEmailsUseCase` — semantic + exact combined search | `todo` | AI Features tasks |
 
 ### Existing Infrastructure
 
-- `SearchIndex` SwiftData model exists (Domain/Models)
-- `SearchRepositoryProtocol` defined (Domain/Protocols) with `search()` method — no implementation yet
-- `AIRepositoryImpl.generateEmbedding()` exists with hash-based 128D fallback — needs CoreML MiniLM for real 384D embeddings
-- `SearchPlaceholder.swift` shows "Search coming soon" placeholder
+- `SearchIndex` SwiftData model exists (Domain/Models) — needs `accountId` field added
+- `SearchRepositoryProtocol` defined (Domain/Protocols) with `search()`, `indexEmail()`, `removeFromIndex()` — needs expansion for hybrid search API
+- `AIRepositoryImpl.generateEmbedding()` exists with FNV-1a hash-based 128D fallback — needs CoreML MiniLM for real 384D embeddings
+- `SearchPlaceholder.swift` shows "Search coming soon" placeholder — will be replaced by `SearchView`
 - `AIProcessingQueue` has `generateEmbeddings()` hook — ready to wire
+- `ThreadListView` has search tab wired to `SearchPlaceholder` — needs rewiring to `SearchView`
+
+---
+
+### IOS-A-14: FTS5 Foundation
+
+- **Status**: `todo`
+- **Spec ref**: FR-SEARCH-06
+- **Validation ref**: AC-S-07
+- **Description**: SQLite FTS5 full-text search database wrapper using raw C API. Separate `search.sqlite` database co-located with SwiftData store.
+- **Deliverables**:
+  - [ ] `FTS5Manager.swift` — actor wrapping raw SQLite C API
+    - Open/close `search.sqlite` database
+    - Create FTS5 virtual table with unicode61 tokenizer (no porter stemmer)
+    - Insert email content (email_id, account_id, subject, body, sender_name, sender_email, folder_name)
+    - Delete by email_id
+    - Search with prefix matching (`query*`), BM25 ranking
+    - Highlight matches via `highlight()` auxiliary function
+    - Handle corrupt DB: detect and auto-rebuild
+  - [ ] Unit tests: FTS5ManagerTests (10+ tests)
+    - Insert and search
+    - Prefix matching ("proj" → "project")
+    - BM25 ranking (multi-term queries)
+    - Delete and verify removal
+    - Highlight output
+    - Empty corpus search
+    - Special character handling
+    - Unicode/accented character search
+    - DB lifecycle (open/close/reopen)
+    - Corrupt DB recovery
+
+---
+
+### IOS-A-01b: CoreML Model Bundling (MiniLM)
+
+- **Status**: `todo`
+- **Spec ref**: FR-SEARCH-07, Search spec Section 3.2
+- **Validation ref**: AC-S-06
+- **Description**: Bundle all-MiniLM-L6-v2 CoreML model (.mlpackage) as SPM resource for 384-dim embedding generation. ~50MB bundled model. DistilBERT is NOT in scope (classification works via LLM fallback).
+- **Deliverables**:
+  - [ ] Convert all-MiniLM-L6-v2 to CoreML format (.mlpackage)
+  - [ ] Add to SPM package resources
+  - [ ] Verify model loads on iOS 18 simulator and device
+  - [ ] Document model source, license (Apache 2.0), and conversion steps
+
+---
+
+### IOS-A-16: GenerateEmbeddingUseCase
+
+- **Status**: `todo`
+- **Spec ref**: FR-SEARCH-07
+- **Validation ref**: AC-S-06, AC-S-08
+- **Description**: CoreML embedding engine wrapper + domain use case for generating query and batch embeddings. Falls back to hash embeddings if CoreML model is unavailable.
+- **Deliverables**:
+  - [ ] `CoreMLEmbeddingEngine.swift` — load MiniLM model, tokenize input, run inference on ANE, return 384-dim Float32 array
+  - [ ] `GenerateEmbeddingUseCase.swift` — domain use case
+    - Single query embedding (for search)
+    - Batch embedding (for indexing during sync)
+    - L2 normalization of output vectors
+    - Fallback to FNV-1a hash embedding if model unavailable
+  - [ ] Unit tests: GenerateEmbeddingUseCaseTests (4+ tests)
+    - Single embedding generation
+    - Batch embedding generation
+    - Hash fallback when model unavailable
+    - Output dimension validation (384)
+
+---
+
+### IOS-A-15: SearchIndexManager + VectorSearchEngine
+
+- **Status**: `todo`
+- **Spec ref**: FR-SEARCH-08, FR-SEARCH-07
+- **Validation ref**: AC-S-09
+- **Description**: Incremental search index management during sync, and in-memory vector search engine for semantic similarity.
+- **Deliverables**:
+  - [ ] Update `SearchIndex.swift` — add `accountId: String` field
+  - [ ] `SearchIndexManager.swift` — actor managing incremental indexing
+    - On new email sync: insert into FTS5 + generate embedding + upsert SearchIndex
+    - On email delete: remove from FTS5 + remove SearchIndex
+    - Auto-detect unindexed emails and index progressively in background
+    - Full reindex capability (for Settings > "Rebuild Search Index")
+    - Wire into `SyncEmailsUseCase` sync pipeline
+    - Wire into `AIProcessingQueue` batch processing
+  - [ ] `VectorSearchEngine.swift` — in-memory cosine similarity
+    - Load pre-normalized embeddings from SwiftData SearchIndex entries
+    - Brute-force dot product for cosine similarity
+    - Return top-50 results by similarity score
+    - Account-scoped loading for memory efficiency
+  - [ ] Unit tests: SearchIndexManagerTests (6+ tests), VectorSearchEngineTests (5+ tests)
+
+---
+
+### IOS-A-17: SearchEmailsUseCase + QueryParser + RRFMerger
+
+- **Status**: `todo`
+- **Spec ref**: FR-SEARCH-04, FR-SEARCH-05, FR-SEARCH-03
+- **Validation ref**: AC-S-05, AC-S-06, AC-S-07
+- **Description**: Natural language query parser, RRF fusion merger, and the main search orchestration use case.
+- **Deliverables**:
+  - [ ] `SearchQuery.swift` — SearchQuery, SearchFilters, SearchScope models
+  - [ ] `SearchResult.swift` — SearchResult, MatchSource models
+  - [ ] `SearchQueryParser.swift` — NL query parsing
+    - Extract sender filter ("from john", "from user@email.com")
+    - Extract date range ("last week", "yesterday", "in January", "before March") via NSDataDetector + regex
+    - Extract attachment filter ("with attachments", "has attachment", "with files")
+    - Extract category filter ("promotions", "social emails")
+    - Extract read status ("unread", "read")
+    - Return remaining text as free-text query
+    - Complete in <5ms
+  - [ ] `RRFMerger.swift` — Reciprocal Rank Fusion
+    - Configurable k parameter (default: 60)
+    - Configurable weight per source (semantic: 1.5x, keyword: 1.0x)
+    - Merge two ranked lists into single scored list
+    - Deduplicate by email ID
+  - [ ] `SearchEmailsUseCase.swift` — hybrid search orchestration
+    - Parse query via SearchQueryParser
+    - Execute FTS5 + semantic search in parallel (async let)
+    - Merge via RRFMerger
+    - Apply structured filters via SwiftData predicate
+    - Group results by thread
+    - Return SearchResult array sorted by score
+    - Graceful fallback: keyword-only if embeddings unavailable
+  - [ ] Update `SearchRepositoryProtocol` — expand for hybrid search
+  - [ ] `SearchRepositoryImpl.swift` — implement expanded protocol
+  - [ ] Unit tests: SearchQueryParserTests (10+), RRFMergerTests (5+), SearchEmailsUseCaseTests (8+)
+
+---
 
 ### IOS-A-18: Search UI
 
 - **Status**: `todo`
-- **Spec ref**: Search spec, FR-SEARCH-01, FR-SEARCH-02, FR-SEARCH-03
-- **Validation ref**: AC-A-07
-- **Description**: Search bar, results display, and filters. Depends on backend tasks IOS-A-14..17. **Note**: Use MV pattern (no ViewModels) per project architecture.
+- **Spec ref**: FR-SEARCH-01, FR-SEARCH-02, FR-SEARCH-03, FR-SEARCH-09
+- **Validation ref**: AC-S-01, AC-S-02, AC-S-03, AC-S-04, AC-S-10, AC-S-12
+- **Description**: Search bar, filters, results display, recent searches. **MV pattern** (no ViewModels) per project architecture — uses @State, @Environment, .task.
 - **Deliverables**:
-  - [ ] `SearchView.swift` — search bar, results, filters (MV pattern, @State + @Environment)
-  - [ ] Recent searches persistence (UserDefaults or SwiftData)
-  - [ ] Integration with `SearchEmailsUseCase` for combined semantic + keyword results
-  - [ ] Wire into ThreadListView navigation
-  - [ ] Unit and integration tests
+  - [ ] `SearchView.swift` — main search view (MV pattern)
+    - `.searchable(text:tokens:isPresented:placement:)` search bar
+    - `.searchScopes()` for All Mail vs Current Folder
+    - 300ms debounced search via `.task(id:)`
+    - View states: idle (zero-state), searching (spinner), results (list), empty (ContentUnavailableView)
+    - Result count display
+    - Integration with `SearchEmailsUseCase` via @Environment
+  - [ ] `SearchFilterChipsView.swift` — horizontal scrollable filter chips
+    - Tappable chips for: Sender, Date, Attachment, Folder, Category, Read/Unread
+    - Active filter indication
+    - Chip tap opens filter picker (sheet or inline)
+  - [ ] `SearchResultRowView.swift` — individual result row
+    - Subject with highlighted matching terms
+    - Body snippet with match context
+    - Sender, date, attachment indicator
+    - Match source indicator (keyword / semantic / both)
+    - Account indicator for multi-account
+  - [ ] `RecentSearchesView.swift` — zero-state content
+    - Last 10 recent searches (UserDefaults)
+    - Top 5 frequent contacts as suggested searches
+    - "Clear Recent Searches" button
+    - Tap to execute recent/suggested search
+  - [ ] Wire into ContentView — replace `SearchPlaceholder` with `SearchView`
+  - [ ] Environment injection: wire `SearchEmailsUseCase` into environment
+  - [ ] Accessibility annotations:
+    - `accessibilityLabel("Search emails")` on search bar
+    - Filter chip labels ("Filter: From John Smith")
+    - Result row accessible descriptions
+    - Empty state VoiceOver announcement
+    - Recent search labels
+    - Dynamic Type support across all elements
+  - [ ] Unit + integration tests: SearchView integration, recent searches persistence, filter chip behavior

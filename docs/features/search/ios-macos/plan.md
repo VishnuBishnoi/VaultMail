@@ -2,7 +2,7 @@
 title: "Search — iOS/macOS Implementation Plan"
 platform: iOS, macOS
 spec-ref: docs/features/search/spec.md
-version: "1.0.0"
+version: "2.0.0"
 status: draft
 assignees:
   - Core Team
@@ -15,47 +15,153 @@ target-milestone: V1.0
 
 ## 1. Scope
 
-This plan covers the search UI and integration with the semantic + exact search backend. The embedding engine, vector store, index manager, and search use case are implemented in AI Features tasks (IOS-A-14 through IOS-A-17); this plan covers the search-specific UI task (IOS-A-18).
+This plan covers the full search feature: FTS5 full-text index, semantic embedding search, hybrid RRF fusion, natural language query parsing, and the search UI. The implementation spans Data, Domain, and Presentation layers.
+
+**Backend tasks** (IOS-A-01b, IOS-A-14–17) build the search infrastructure. **UI task** (IOS-A-18) builds the search interface. All tasks are tracked in this plan and the corresponding tasks file.
 
 ---
 
 ## 2. Platform Context
 
-Refer to Foundation plan Section 2.
+Refer to Foundation plan Section 2. Search is fully local (no server-side IMAP SEARCH). All components work offline. macOS adaptation is deferred — iOS search UI only for V1.
 
 ---
 
 ## 3. Architecture Mapping
 
-### Files
+### Files — Data Layer
 
 | File | Layer | Purpose |
 |------|-------|---------|
-| `SearchView.swift` | iOS/Views/Search | Search bar, results, filters |
-| `SearchViewModel.swift` | iOS/Views/Search | Query handling, result display |
-| `EmbeddingEngine.swift` | Data/AI | Query embedding generation |
-| `VectorStore.swift` | Data/Search | Embedding storage + similarity search |
-| `SearchIndexManager.swift` | Data/Search | Index build + incremental update |
-| `SearchEmailsUseCase.swift` | Domain/UseCases | Combined semantic + exact search |
+| `FTS5Manager.swift` | Data/Search | SQLite FTS5 database wrapper (raw C API) — create, insert, delete, search, highlight |
+| `VectorSearchEngine.swift` | Data/Search | In-memory cosine similarity on pre-normalized 384-dim embeddings |
+| `RRFMerger.swift` | Data/Search | Reciprocal Rank Fusion scoring: merge keyword + semantic rankings |
+| `SearchRepositoryImpl.swift` | Data/Search | Implements `SearchRepositoryProtocol` — orchestrates FTS5 + vector + SwiftData |
+| `SearchIndexManager.swift` | Data/Search | Incremental index build during sync (FTS5 insert + embedding generation) |
+
+### Files — Domain Layer
+
+| File | Layer | Purpose |
+|------|-------|---------|
+| `SearchEmailsUseCase.swift` | Domain/UseCases | Orchestrates hybrid search: parse → FTS5 + semantic in parallel → RRF merge → filter |
+| `GenerateEmbeddingUseCase.swift` | Domain/UseCases | Query + batch embedding generation via CoreML (all-MiniLM-L6-v2) |
+| `SearchQueryParser.swift` | Domain/UseCases | Natural language query → SearchQuery (regex + NSDataDetector) |
+| `SearchQuery.swift` | Domain/Models | SearchQuery, SearchFilters, SearchScope model types |
+| `SearchResult.swift` | Domain/Models | SearchResult, MatchSource model types |
+
+### Files — Presentation Layer
+
+| File | Layer | Purpose |
+|------|-------|---------|
+| `SearchView.swift` | Presentation/Views/Search | Search bar, results list, view states (MV pattern, @State + @Environment) |
+| `SearchFilterChipsView.swift` | Presentation/Views/Search | Horizontal filter chip bar below search |
+| `SearchResultRowView.swift` | Presentation/Views/Search | Individual result row with highlights and snippet |
+| `RecentSearchesView.swift` | Presentation/Views/Search | Zero-state: recent searches + suggested contacts |
+
+### Files — AI/CoreML
+
+| File | Layer | Purpose |
+|------|-------|---------|
+| `all-MiniLM-L6-v2.mlpackage` | Resources | CoreML embedding model (384-dim, 50MB, bundled) |
+| `CoreMLEmbeddingEngine.swift` | Data/AI | CoreML wrapper for MiniLM embedding inference |
+
+### Existing Files to Modify
+
+| File | Change |
+|------|--------|
+| `SearchIndex.swift` | Add `accountId: String` field |
+| `SearchRepositoryProtocol.swift` | Expand protocol to support hybrid search API |
+| `SearchPlaceholder.swift` | Replace with `SearchView` |
+| `ContentView.swift` / tab navigation | Wire `SearchView` into Search tab |
+| `SyncEmailsUseCase.swift` | Hook `SearchIndexManager` for incremental indexing |
+| `AIProcessingQueue.swift` | Wire embedding generation during batch processing |
 
 ---
 
 ## 4. Implementation Phases
 
-| Task ID | Description | Dependencies | Feature |
-|---------|-------------|-------------|---------|
-| IOS-A-14 | Embedding engine setup | IOS-A-01 (AI Features) | AI Features |
-| IOS-A-15 | Vector store implementation | IOS-A-14 | AI Features |
-| IOS-A-16 | Search index manager | IOS-A-15 | AI Features |
-| IOS-A-17 | Search use case (semantic + exact) | IOS-A-16 | AI Features |
-| IOS-A-18 | Search UI (search bar, results, filters) | IOS-A-17, IOS-U-01 (Thread List) | Search |
+### Phase 1: FTS5 Foundation (IOS-A-14)
 
-Note: Tasks IOS-A-14 through IOS-A-17 are backend tasks tracked in the AI Features tasks file. IOS-A-18 is the search-specific UI task tracked here.
+| Task | Description | Dependencies |
+|------|-------------|-------------|
+| IOS-A-14a | `FTS5Manager` — SQLite C API wrapper: open/close DB, create FTS5 table, insert/delete/search/highlight | None |
+| IOS-A-14b | Unit tests for FTS5Manager (insert, search, prefix match, BM25 ranking, delete, highlight) | IOS-A-14a |
+
+### Phase 2: CoreML Embedding Model (IOS-A-01b + IOS-A-16)
+
+| Task | Description | Dependencies |
+|------|-------------|-------------|
+| IOS-A-01b | Bundle all-MiniLM-L6-v2 CoreML model (.mlpackage) in SPM resources | None |
+| IOS-A-16a | `CoreMLEmbeddingEngine` — load model, tokenize text, run inference, return 384-dim Float32 | IOS-A-01b |
+| IOS-A-16b | `GenerateEmbeddingUseCase` — single query + batch embedding with CoreML → hash fallback | IOS-A-16a |
+| IOS-A-16c | Unit tests for embedding generation (model loaded, output dimensions, normalization) | IOS-A-16b |
+
+### Phase 3: Search Index & Vector Search (IOS-A-15)
+
+| Task | Description | Dependencies |
+|------|-------------|-------------|
+| IOS-A-15a | `SearchIndexManager` — incremental FTS5 + embedding indexing during sync | IOS-A-14, IOS-A-16 |
+| IOS-A-15b | `VectorSearchEngine` — load embeddings from SwiftData into memory, brute-force cosine similarity | IOS-A-16 |
+| IOS-A-15c | Wire `SearchIndexManager` into `SyncEmailsUseCase` and `AIProcessingQueue` | IOS-A-15a |
+| IOS-A-15d | Update `SearchIndex` model: add `accountId` field | None |
+| IOS-A-15e | Unit tests for index manager and vector search | IOS-A-15a, IOS-A-15b |
+
+### Phase 4: Search Use Case & Query Parser (IOS-A-17)
+
+| Task | Description | Dependencies |
+|------|-------------|-------------|
+| IOS-A-17a | `SearchQueryParser` — regex + NSDataDetector for NL filter extraction | None |
+| IOS-A-17b | `RRFMerger` — Reciprocal Rank Fusion scoring with configurable k and weights | None |
+| IOS-A-17c | `SearchEmailsUseCase` — orchestrate parse → parallel FTS5 + semantic → RRF merge → filter | IOS-A-14, IOS-A-15b, IOS-A-17a, IOS-A-17b |
+| IOS-A-17d | `SearchRepositoryImpl` — implement `SearchRepositoryProtocol` | IOS-A-17c |
+| IOS-A-17e | Unit tests for parser, merger, and use case | IOS-A-17a–d |
+
+### Phase 5: Search UI (IOS-A-18)
+
+| Task | Description | Dependencies |
+|------|-------------|-------------|
+| IOS-A-18a | `SearchView` — search bar, view states, debounced search, scope picker | IOS-A-17 |
+| IOS-A-18b | `SearchFilterChipsView` — horizontal filter chips, tap to toggle | IOS-A-18a |
+| IOS-A-18c | `SearchResultRowView` — result row with highlights, snippet, match source indicator | IOS-A-18a |
+| IOS-A-18d | `RecentSearchesView` — zero-state with recent searches + top contacts | IOS-A-18a |
+| IOS-A-18e | Wire into ContentView (replace SearchPlaceholder), environment injection | IOS-A-18a |
+| IOS-A-18f | Accessibility annotations (labels, hints, Dynamic Type, VoiceOver) | IOS-A-18a–d |
+| IOS-A-18g | Unit + integration tests | IOS-A-18a–f |
 
 ---
 
-## 5. Risks and Mitigations
+## 5. Dependency Graph
+
+```
+IOS-A-01b (CoreML model bundling)
+    |
+    v
+IOS-A-16 (GenerateEmbeddingUseCase)
+    |                               IOS-A-14 (FTS5Manager)
+    |                                   |
+    v                                   v
+IOS-A-15 (SearchIndexManager + VectorSearchEngine)
+    |                                   |
+    +-----------------------------------+
+    |
+    v
+IOS-A-17 (SearchEmailsUseCase + QueryParser + RRFMerger)
+    |
+    v
+IOS-A-18 (Search UI)
+```
+
+**Parallelizable**: IOS-A-01b + IOS-A-14 can be built concurrently (no dependency between them). IOS-A-17a (QueryParser) and IOS-A-17b (RRFMerger) can also be built concurrently.
+
+---
+
+## 6. Risks and Mitigations
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Embedding quality varies by model | Medium | Medium | Test multiple embedding models; use all-MiniLM-L6-v2 as baseline |
+| CoreML model conversion issues | Medium | High | Test .mlpackage early; fall back to hash embeddings if conversion fails |
+| FTS5 not available in iOS SQLite | Low | High | iOS bundles SQLite with FTS5 enabled by default since iOS 8 |
+| Memory pressure from in-memory vectors (50K+ emails) | Medium | Medium | Lazy loading by account; unload when Search tab not visible |
+| BM25 ranking quality for email content | Low | Low | Email text is well-structured (subject, body, sender); BM25 works well |
+| Raw SQLite C API memory management | Medium | Medium | Careful `sqlite3_finalize` / `sqlite3_close` in deinit; unit test lifecycle |
+| Search performance degrades at 100K+ | Low | Medium | Document as known limitation; brute-force vector search is O(n) |
