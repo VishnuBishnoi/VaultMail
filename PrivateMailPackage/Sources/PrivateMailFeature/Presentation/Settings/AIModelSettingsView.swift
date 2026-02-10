@@ -2,159 +2,190 @@ import SwiftUI
 
 /// AI model management settings.
 ///
-/// Displays model status, download/delete actions, and model details.
-/// V1: Download is stubbed (simulated progress).
+/// Displays available GGUF models with download status, download/delete actions,
+/// and model details including size, license, and source URL.
 ///
-/// Spec ref: FR-SET-04, Proposal Section 3.4.1, Foundation Section 11
+/// Wired to real `ModelManager` for download, verification, and storage tracking.
+///
+/// Spec ref: FR-SET-04, Proposal Section 3.4.1, Constitution LG-01, AC-A-03
 struct AIModelSettingsView: View {
-    @State private var downloadState: AIDownloadState = .notDownloaded
+    let modelManager: ModelManager
+    var aiEngineResolver: AIEngineResolver?
+
+    @State private var models: [ModelManager.ModelState] = []
+    @State private var downloadingModelID: String?
+    @State private var downloadProgress: Double = 0
+    @State private var storageUsage: UInt64 = 0
     @State private var showDeleteConfirmation = false
+    @State private var modelToDelete: String?
 
     var body: some View {
         List {
-            // Model status
-            Section("Status") {
-                HStack {
-                    Text("AI Model")
-                    Spacer()
-                    statusBadge
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("AI Model status: \(statusLabel)")
+            // Storage usage
+            Section("Storage") {
+                LabeledContent("AI Models", value: formattedStorageUsage)
+                    .accessibilityLabel("AI model storage usage: \(formattedStorageUsage)")
             }
 
-            // Model details
-            Section("Details") {
-                LabeledContent("Model", value: "PrivateMail AI v1")
-                LabeledContent("Size", value: "~1.5 GB")
-                LabeledContent("Source", value: "huggingface.co/privatemail")
-                LabeledContent("License", value: "Apache 2.0")
-            }
+            // Available models
+            ForEach(models) { model in
+                Section(model.info.name) {
+                    LabeledContent("Size", value: model.info.formattedSize)
+                    LabeledContent("License", value: model.info.license)
+                    LabeledContent("Source", value: model.info.downloadURL.host ?? "Unknown")
+                    LabeledContent("Min RAM", value: "\(model.info.minRAMGB) GB")
 
-            // Actions
-            Section {
-                switch downloadState {
-                case .notDownloaded:
-                    Button("Download AI Model") {
-                        startDownload()
-                    }
-
-                case .downloading(let progress):
-                    VStack(alignment: .leading, spacing: 8) {
-                        ProgressView(value: progress)
-                        HStack {
-                            Text("Downloading… \(Int(progress * 100))%")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button("Cancel", role: .cancel) {
-                                downloadState = .notDownloaded
-                            }
-                            .font(.caption)
-                        }
-                    }
-
-                case .verifying:
-                    HStack {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Verifying integrity…")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-
-                case .downloaded:
-                    Button("Delete AI Model", role: .destructive) {
-                        showDeleteConfirmation = true
-                    }
-                    .alert("Delete AI Model", isPresented: $showDeleteConfirmation) {
-                        Button("Delete", role: .destructive) {
-                            downloadState = .notDownloaded
-                            // TODO: Delete actual model file when Data/AI/ layer is built.
-                        }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("Deleting the AI model will disable smart categories, smart reply, and thread summarization.")
-                    }
-
-                case .failed(let message):
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label(message, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                            .font(.callout)
-                        Button("Retry") {
-                            startDownload()
-                        }
-                    }
+                    modelActionView(for: model)
                 }
             }
         }
-        .navigationTitle("AI Model")
+        .navigationTitle("AI Models")
+        .task {
+            await loadModels()
+        }
     }
 
-    // MARK: - Status Display
+    // MARK: - Model Action View
 
     @ViewBuilder
-    private var statusBadge: some View {
-        switch downloadState {
+    private func modelActionView(for model: ModelManager.ModelState) -> some View {
+        switch model.status {
         case .notDownloaded:
-            Text("Not Downloaded")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        case .downloading:
-            Text("Downloading")
-                .font(.callout)
-                .foregroundStyle(.orange)
+            if downloadingModelID == model.id {
+                downloadProgressView
+            } else {
+                Button("Download") {
+                    startDownload(modelID: model.id)
+                }
+            }
+
+        case .downloading(let progress):
+            VStack(alignment: .leading, spacing: 8) {
+                ProgressView(value: progress)
+                HStack {
+                    Text("Downloading… \(Int(progress * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel", role: .cancel) {
+                        cancelDownload(modelID: model.id)
+                    }
+                    .font(.caption)
+                }
+            }
+
         case .verifying:
-            Text("Verifying")
-                .font(.callout)
-                .foregroundStyle(.orange)
+            HStack {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Verifying integrity…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
         case .downloaded:
-            Label("Downloaded", systemImage: "checkmark.circle.fill")
-                .font(.callout)
-                .foregroundStyle(.green)
-        case .failed:
-            Label("Failed", systemImage: "xmark.circle.fill")
-                .font(.callout)
-                .foregroundStyle(.red)
+            Button("Delete", role: .destructive) {
+                modelToDelete = model.id
+                showDeleteConfirmation = true
+            }
+            .alert("Delete \(model.info.name)?", isPresented: $showDeleteConfirmation) {
+                Button("Delete", role: .destructive) {
+                    if let id = modelToDelete {
+                        deleteModel(modelID: id)
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    modelToDelete = nil
+                }
+            } message: {
+                Text("Deleting this model will disable AI features that require it. You can re-download it later.")
+            }
+
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 8) {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.callout)
+                Button("Retry") {
+                    startDownload(modelID: model.id)
+                }
+            }
         }
     }
 
-    private var statusLabel: String {
-        switch downloadState {
-        case .notDownloaded: "Not downloaded"
-        case .downloading: "Downloading"
-        case .verifying: "Verifying"
-        case .downloaded: "Downloaded"
-        case .failed: "Failed"
+    @ViewBuilder
+    private var downloadProgressView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ProgressView(value: downloadProgress)
+            HStack {
+                Text("Downloading… \(Int(downloadProgress * 100))%")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel", role: .cancel) {
+                    if let id = downloadingModelID {
+                        cancelDownload(modelID: id)
+                    }
+                }
+                .font(.caption)
+            }
         }
+    }
+
+    // MARK: - Helpers
+
+    private var formattedStorageUsage: String {
+        ByteCountFormatter.string(fromByteCount: Int64(storageUsage), countStyle: .file)
     }
 
     // MARK: - Actions
 
-    /// PARTIAL SCOPE — V1 STUB: Simulates download.
-    /// Blocked on Data/AI/ layer. Real implementation MUST provide:
-    /// - HTTPS download with HTTP Range resume support (FR-SET-04)
-    /// - Post-download SHA-256 integrity verification
-    /// - Corrupted file cleanup on checksum mismatch
-    /// See OnboardingAIModelStep for identical stub logic.
-    private func startDownload() {
-        downloadState = .downloading(progress: 0)
+    private func loadModels() async {
+        models = await modelManager.availableModels()
+        storageUsage = await modelManager.storageUsage()
+    }
+
+    private func startDownload(modelID: String) {
+        downloadingModelID = modelID
+        downloadProgress = 0
+
         Task {
-            for i in 1...10 {
-                try? await Task.sleep(for: .milliseconds(300))
-                if case .notDownloaded = downloadState { return }
-                downloadState = .downloading(progress: Double(i) / 10.0)
+            do {
+                try await modelManager.downloadModel(id: modelID) { progress in
+                    Task { @MainActor in
+                        self.downloadProgress = progress
+                    }
+                }
+                downloadingModelID = nil
+                await aiEngineResolver?.invalidateCache()
+                await loadModels()
+            } catch {
+                downloadingModelID = nil
+                await loadModels()
             }
-            downloadState = .verifying
-            try? await Task.sleep(for: .milliseconds(500))
-            downloadState = .downloaded
+        }
+    }
+
+    private func cancelDownload(modelID: String) {
+        Task {
+            await modelManager.cancelDownload(id: modelID)
+            downloadingModelID = nil
+            await loadModels()
+        }
+    }
+
+    private func deleteModel(modelID: String) {
+        Task {
+            try? await modelManager.deleteModel(id: modelID)
+            modelToDelete = nil
+            await aiEngineResolver?.invalidateCache()
+            await loadModels()
         }
     }
 }
 
 #Preview {
     NavigationStack {
-        AIModelSettingsView()
+        AIModelSettingsView(modelManager: ModelManager())
     }
 }

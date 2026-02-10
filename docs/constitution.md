@@ -168,7 +168,7 @@ This constitution defines the immutable constraints, principles, and rules that 
 | Gemma | Gemma Terms of Use | Yes | Yes (with terms) | Review required |
 
 - The final model selection **MUST** be made only after license verification.
-- Model files **MUST NOT** be bundled in the app binary submitted to the App Store. They **MUST** be downloaded post-install.
+- **Large generative model files** (> 200 MB) **MUST NOT** be bundled in the app binary submitted to the App Store. They **MUST** be downloaded post-install. **Small classification and embedding models** (< 200 MB each, e.g., CoreML .mlpackage files) **MAY** be bundled in the app binary when their total size does not exceed 200 MB and their licenses permit redistribution (see license table above).
 
 ### LG-02: Gmail OAuth Requirements
 
@@ -529,3 +529,4 @@ depends-on: [docs/constitution.md]
 |---|------|-------------|-------------|
 | — | 2025-02-07 | Initial ratification | Core Team |
 | 1 | 2025-02-07 | P-02 OAuth/model-download exceptions clarified; P-03 bundle contradiction fixed; LG-03 privacy table corrected. Status → locked. | Core Team |
+| 2 | 2026-02-09 | LG-01 amended: small classification/embedding models (< 200 MB each, ≤ 200 MB total) MAY be bundled in app binary. Large generative models (> 200 MB) still MUST be downloaded post-install. | Core Team |

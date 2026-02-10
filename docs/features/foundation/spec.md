@@ -458,8 +458,8 @@ Refer to Constitution TC-06 for hard limits.
 
 - All AI models **MUST** have licenses permitting commercial use and local redistribution.
 - Model license details **MUST** be displayed in Settings → About → AI Model Licenses.
-- Models **MUST NOT** be bundled in the App Store binary; they **MUST** be downloaded post-install.
-- Refer to Constitution LG-01 for the pre-approved model list and license review requirements.
+- Large generative models (> 200 MB) **MUST NOT** be bundled in the App Store binary; they **MUST** be downloaded post-install. Small classification and embedding models (< 200 MB each, ≤ 200 MB total) **MAY** be bundled per Constitution LG-01 (Amendment 2).
+- Refer to Constitution LG-01 for the pre-approved model list, bundling limits, and license review requirements.
 
 ### 10.2 Gmail OAuth Compliance
 

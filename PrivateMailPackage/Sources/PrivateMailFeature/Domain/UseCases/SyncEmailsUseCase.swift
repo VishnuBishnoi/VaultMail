@@ -10,10 +10,14 @@ import CryptoKit
 @MainActor
 public protocol SyncEmailsUseCaseProtocol {
     /// Full sync for an account: folders + emails for all syncable folders.
-    func syncAccount(accountId: String) async throws
+    /// Returns all newly synced emails so callers can enqueue them for AI processing.
+    @discardableResult
+    func syncAccount(accountId: String) async throws -> [Email]
 
     /// Incremental sync for a single folder.
-    func syncFolder(accountId: String, folderId: String) async throws
+    /// Returns newly synced emails so callers can enqueue them for AI processing.
+    @discardableResult
+    func syncFolder(accountId: String, folderId: String) async throws -> [Email]
 }
 
 /// Abstraction for obtaining IMAP connections. ConnectionPool conforms
@@ -81,7 +85,8 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
 
     // MARK: - Public API
 
-    public func syncAccount(accountId: String) async throws {
+    @discardableResult
+    public func syncAccount(accountId: String) async throws -> [Email] {
         NSLog("[Sync] syncAccount started for \(accountId)")
         let account = try await findAccount(id: accountId)
         NSLog("[Sync] Found account: \(account.email), host: \(account.imapHost):\(account.imapPort)")
@@ -114,6 +119,7 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
             // 2. Sync emails for each folder
             let existingEmails = try await emailRepository.getEmailsByAccount(accountId: account.id)
             var emailLookup = buildMessageIdLookup(from: existingEmails)
+            var allSyncedEmails: [Email] = []
             NSLog("[Sync] Existing emails in DB: \(existingEmails.count)")
 
             for folder in syncableFolders {
@@ -128,14 +134,16 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
                 for email in newEmails {
                     emailLookup[email.messageId] = email
                 }
+                allSyncedEmails.append(contentsOf: newEmails)
             }
 
             // 3. Update account sync date
             account.lastSyncDate = Date()
             try await accountRepository.updateAccount(account)
-            NSLog("[Sync] syncAccount completed successfully")
+            NSLog("[Sync] syncAccount completed successfully (\(allSyncedEmails.count) new emails)")
 
             await connectionProvider.checkinConnection(client, accountId: account.id)
+            return allSyncedEmails
         } catch {
             NSLog("[Sync] syncAccount ERROR: \(error)")
             await connectionProvider.checkinConnection(client, accountId: account.id)
@@ -143,7 +151,8 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
         }
     }
 
-    public func syncFolder(accountId: String, folderId: String) async throws {
+    @discardableResult
+    public func syncFolder(accountId: String, folderId: String) async throws -> [Email] {
         let account = try await findAccount(id: accountId)
         let token = try await getAccessToken(for: account)
 
@@ -164,7 +173,7 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
             let existingEmails = try await emailRepository.getEmailsByAccount(accountId: account.id)
             let emailLookup = buildMessageIdLookup(from: existingEmails)
 
-            _ = try await syncFolderEmails(
+            let newEmails = try await syncFolderEmails(
                 client: client,
                 account: account,
                 folder: folder,
@@ -172,6 +181,7 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
             )
 
             await connectionProvider.checkinConnection(client, accountId: account.id)
+            return newEmails
         } catch {
             await connectionProvider.checkinConnection(client, accountId: account.id)
             throw error
@@ -491,14 +501,17 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
         let existingThread = try await emailRepository.getThread(id: threadId)
 
         let thread: PrivateMailFeature.Thread
+        let isNewThread: Bool
         if let existing = existingThread {
             thread = existing
+            isNewThread = false
         } else {
             thread = PrivateMailFeature.Thread(
                 id: threadId,
                 accountId: accountId,
                 subject: oldest.subject
             )
+            isNewThread = true
         }
 
         thread.subject = oldest.subject
@@ -507,7 +520,12 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
         thread.unreadCount = threadEmails.filter { !$0.isRead }.count
         thread.isStarred = threadEmails.contains { $0.isStarred }
         thread.snippet = newest.snippet
-        thread.aiCategory = AICategory.uncategorized.rawValue
+
+        // Only set uncategorized for brand-new threads.
+        // Existing threads preserve their AI-assigned or manual category.
+        if isNewThread {
+            thread.aiCategory = AICategory.uncategorized.rawValue
+        }
 
         // Build participants from unique from/to addresses
         var participantSet: [String: Participant] = [:]
@@ -584,6 +602,7 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
             isDraft: header.flags.contains("\\Draft"),
             isDeleted: header.flags.contains("\\Deleted"),
             aiCategory: AICategory.uncategorized.rawValue,
+            authenticationResults: header.authenticationResults,
             sizeBytes: Int(header.size)
         )
     }

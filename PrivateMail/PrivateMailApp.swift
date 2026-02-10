@@ -18,6 +18,11 @@ struct PrivateMailApp: App {
     let queryContacts: QueryContactsUseCaseProtocol
     let idleMonitor: IDLEMonitorUseCaseProtocol
     let backgroundSyncScheduler: BackgroundSyncScheduler
+    let aiModelManager: ModelManager
+    let aiEngineResolver: AIEngineResolver
+    let aiProcessingQueue: AIProcessingQueue
+    let summarizeThread: SummarizeThreadUseCase
+    let smartReply: SmartReplyUseCase
 
     init() {
         do {
@@ -90,6 +95,24 @@ struct PrivateMailApp: App {
         )
         backgroundSyncScheduler.registerTasks()
         backgroundSyncScheduler.scheduleNextSync()
+
+        aiModelManager = ModelManager()
+
+        // AI engine resolver + classification pipeline
+        aiEngineResolver = AIEngineResolver(modelManager: aiModelManager)
+        let categorizeUseCase = CategorizeEmailUseCase(engineResolver: aiEngineResolver)
+        let detectSpamUseCase = DetectSpamUseCase(engineResolver: aiEngineResolver)
+        // AI summary + smart reply use cases
+        let aiRepository = AIRepositoryImpl(engineResolver: aiEngineResolver)
+
+        aiProcessingQueue = AIProcessingQueue(
+            categorize: categorizeUseCase,
+            detectSpam: detectSpamUseCase,
+            aiRepository: aiRepository,
+            modelContainer: modelContainer
+        )
+        summarizeThread = SummarizeThreadUseCase(aiRepository: aiRepository)
+        smartReply = SmartReplyUseCase(aiRepository: aiRepository)
     }
 
     var body: some Scene {
@@ -105,7 +128,12 @@ struct PrivateMailApp: App {
                 composeEmail: composeEmail,
                 queryContacts: queryContacts,
                 idleMonitor: idleMonitor,
-                appLockManager: appLockManager
+                appLockManager: appLockManager,
+                modelManager: aiModelManager,
+                aiEngineResolver: aiEngineResolver,
+                aiProcessingQueue: aiProcessingQueue,
+                summarizeThread: summarizeThread,
+                smartReply: smartReply
             )
             .environment(settingsStore)
         }
@@ -113,7 +141,7 @@ struct PrivateMailApp: App {
 
         #if os(macOS)
         Settings {
-            SettingsView(manageAccounts: manageAccounts)
+            SettingsView(manageAccounts: manageAccounts, modelManager: aiModelManager)
                 .environment(settingsStore)
                 .modelContainer(modelContainer)
         }

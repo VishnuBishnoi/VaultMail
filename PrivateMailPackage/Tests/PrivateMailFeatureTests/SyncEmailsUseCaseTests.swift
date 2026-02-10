@@ -98,7 +98,7 @@ struct SyncEmailsUseCaseTests {
     func syncAccountNotFound() async {
         let useCase = sut
         await #expect(throws: SyncError.self) {
-            try await useCase.syncAccount(accountId: "nonexistent")
+            _ = try await useCase.syncAccount(accountId: "nonexistent")
         }
     }
 
@@ -110,7 +110,7 @@ struct SyncEmailsUseCaseTests {
 
         let useCase = sut
         await #expect(throws: SyncError.self) {
-            try await useCase.syncAccount(accountId: account.id)
+            _ = try await useCase.syncAccount(accountId: account.id)
         }
     }
 
@@ -494,7 +494,7 @@ struct SyncEmailsUseCaseTests {
 
         let useCase = sut
         await #expect(throws: SyncError.self) {
-            try await useCase.syncFolder(accountId: account.id, folderId: "nonexistent")
+            _ = try await useCase.syncFolder(accountId: account.id, folderId: "nonexistent")
         }
     }
 

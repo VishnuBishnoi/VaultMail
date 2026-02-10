@@ -56,6 +56,15 @@ public final class Email {
     public var aiCategory: String?
     /// AI-generated summary
     public var aiSummary: String?
+    /// Whether this email is flagged as spam/phishing by AI detection.
+    /// Never auto-deleted; displayed as visual warning only. User can override.
+    /// Spec ref: FR-AI-06
+    public var isSpam: Bool
+    /// Raw Authentication-Results header from IMAP (SPF/DKIM/DMARC).
+    /// Stored as the full header value string for RuleEngine analysis.
+    /// Populated during IMAP sync from the email's headers.
+    /// Spec ref: FR-AI-06 (header authentication signal)
+    public var authenticationResults: String?
     /// Email size in bytes
     public var sizeBytes: Int
     /// Send pipeline state (raw value of SendState)
@@ -102,6 +111,8 @@ public final class Email {
         isDeleted: Bool = false,
         aiCategory: String? = AICategory.uncategorized.rawValue,
         aiSummary: String? = nil,
+        isSpam: Bool = false,
+        authenticationResults: String? = nil,
         sizeBytes: Int = 0,
         sendState: String = SendState.none.rawValue,
         sendRetryCount: Int = 0,
@@ -130,6 +141,8 @@ public final class Email {
         self.isDeleted = isDeleted
         self.aiCategory = aiCategory
         self.aiSummary = aiSummary
+        self.isSpam = isSpam
+        self.authenticationResults = authenticationResults
         self.sizeBytes = sizeBytes
         self.sendState = sendState
         self.sendRetryCount = sendRetryCount

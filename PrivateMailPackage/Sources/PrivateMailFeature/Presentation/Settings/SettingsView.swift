@@ -16,6 +16,8 @@ public struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     let manageAccounts: ManageAccountsUseCaseProtocol
+    let modelManager: ModelManager
+    var aiEngineResolver: AIEngineResolver?
 
     @State private var accounts: [Account] = []
     @State private var isAddingAccount = false
@@ -25,8 +27,10 @@ public struct SettingsView: View {
     @State private var errorMessage: String?
     @State private var notificationPermissionDenied = false
 
-    public init(manageAccounts: ManageAccountsUseCaseProtocol) {
+    public init(manageAccounts: ManageAccountsUseCaseProtocol, modelManager: ModelManager = ModelManager(), aiEngineResolver: AIEngineResolver? = nil) {
         self.manageAccounts = manageAccounts
+        self.modelManager = modelManager
+        self.aiEngineResolver = aiEngineResolver
     }
 
     public var body: some View {
@@ -133,7 +137,7 @@ public struct SettingsView: View {
 
             // Category tab toggles (FR-SET-01, Thread List FR-TL-02)
             NavigationLink("Category Tabs") {
-                CategoryTabsSettingsView()
+                CategoryTabsSettingsView(modelManager: modelManager)
             }
         }
     }
@@ -142,7 +146,7 @@ public struct SettingsView: View {
     private var aiSection: some View {
         Section("AI Features") {
             NavigationLink("AI Model") {
-                AIModelSettingsView()
+                AIModelSettingsView(modelManager: modelManager, aiEngineResolver: aiEngineResolver)
             }
         }
     }
@@ -376,11 +380,17 @@ struct NotificationToggleRow: View {
 // MARK: - Category Tabs Settings
 
 /// Category tab visibility toggles.
-/// If AI model is not downloaded, toggles are disabled with a note.
+/// If no AI engine is available, toggles are disabled with a note.
+///
+/// Checks effective engine availability: Foundation Models (iOS 26+),
+/// ANY downloaded GGUF model (not just the recommended one).
 ///
 /// Spec ref: FR-SET-01 Appearance section
 struct CategoryTabsSettingsView: View {
     @Environment(SettingsStore.self) private var settings
+    let modelManager: ModelManager
+
+    @State private var isAIAvailable = false
 
     private let toggleableCategories: [(String, String)] = [
         (AICategory.primary.rawValue, "Primary"),
@@ -389,18 +399,10 @@ struct CategoryTabsSettingsView: View {
         (AICategory.updates.rawValue, "Updates"),
     ]
 
-    /// Whether the AI model is downloaded and available for categorization.
-    /// PARTIAL SCOPE — V1 STUB: Always returns false until Data/AI/ layer is built.
-    /// Wire to real AI model availability check when AIModelManager is implemented.
-    private var isAIModelAvailable: Bool {
-        // TODO: Replace with real check via AIModelManager (IOS-F-06).
-        false
-    }
-
     var body: some View {
         @Bindable var settings = settings
         List {
-            if !isAIModelAvailable {
+            if !isAIAvailable {
                 Section {
                     Label(
                         "Download the AI model to enable smart categories.",
@@ -417,11 +419,21 @@ struct CategoryTabsSettingsView: View {
                         get: { settings.categoryTabVisibility[key] ?? true },
                         set: { settings.categoryTabVisibility[key] = $0 }
                     ))
-                    .disabled(!isAIModelAvailable)
+                    .disabled(!isAIAvailable)
                 }
             }
         }
         .navigationTitle("Category Tabs")
+        .task {
+            // Check Foundation Models first (iOS 26+ — zero download needed)
+            let fmEngine = FoundationModelEngine()
+            if await fmEngine.isAvailable() {
+                isAIAvailable = true
+                return
+            }
+            // Then check if ANY GGUF model is downloaded (not just the recommended one)
+            isAIAvailable = await modelManager.isAnyModelDownloaded()
+        }
     }
 }
 

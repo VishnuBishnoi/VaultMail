@@ -15,19 +15,23 @@ struct BackgroundSyncSchedulerTests {
         var lastSyncedAccountId: String?
         var shouldThrow = false
 
-        func syncAccount(accountId: String) async throws {
+        @discardableResult
+        func syncAccount(accountId: String) async throws -> [Email] {
             syncAccountCallCount += 1
             lastSyncedAccountId = accountId
             if shouldThrow {
                 throw AccountError.notFound(accountId)
             }
+            return []
         }
 
-        func syncFolder(accountId: String, folderId: String) async throws {
+        @discardableResult
+        func syncFolder(accountId: String, folderId: String) async throws -> [Email] {
             syncFolderCallCount += 1
             if shouldThrow {
                 throw AccountError.notFound(accountId)
             }
+            return []
         }
     }
 

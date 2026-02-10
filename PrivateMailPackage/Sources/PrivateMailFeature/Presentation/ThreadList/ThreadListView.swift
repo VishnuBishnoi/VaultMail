@@ -31,6 +31,11 @@ struct ThreadListView: View {
     let composeEmail: ComposeEmailUseCaseProtocol
     let queryContacts: QueryContactsUseCaseProtocol
     let idleMonitor: IDLEMonitorUseCaseProtocol?
+    var modelManager: ModelManager = ModelManager()
+    var aiEngineResolver: AIEngineResolver?
+    var aiProcessingQueue: AIProcessingQueue?
+    var summarizeThread: SummarizeThreadUseCaseProtocol?
+    var smartReply: SmartReplyUseCaseProtocol?
 
     @Environment(UndoSendManager.self) private var undoSendManager
 
@@ -111,6 +116,7 @@ struct ThreadListView: View {
     enum TabDestination: Hashable {
         case search
         case settings
+        case aiChat
     }
 
     // MARK: - Derived State
@@ -195,6 +201,7 @@ struct ThreadListView: View {
                             let accountId = selectedAccount?.id ?? accounts.first?.id ?? ""
                             composerMode = .new(accountId: accountId)
                         },
+                        onAIChatTap: { navigationPath.append(TabDestination.aiChat) },
                         onSettingsTap: { navigationPath.append(TabDestination.settings) }
                     )
                 }
@@ -214,46 +221,13 @@ struct ThreadListView: View {
                 }
             }
             .navigationDestination(for: TabDestination.self) { destination in
-                switch destination {
-                case .search:
-                    SearchPlaceholder()
-                case .settings:
-                    SettingsView(manageAccounts: manageAccounts)
-                }
+                tabDestinationView(for: destination)
             }
             .sheet(item: $composerMode) { mode in
-                ComposerView(
-                    composeEmail: composeEmail,
-                    queryContacts: queryContacts,
-                    smartReply: SmartReplyUseCase(aiRepository: StubAIRepository()),
-                    mode: mode,
-                    accounts: accounts,
-                    onDismiss: { result in
-                        composerMode = nil
-                        handleComposerDismiss(result)
-                    }
-                )
-                .environment(settings)
+                composerSheet(for: mode)
             }
             .sheet(isPresented: $showAccountSwitcher) {
-                AccountSwitcherSheet(
-                    accounts: accounts,
-                    selectedAccountId: selectedAccount?.id,
-                    onSelectAccount: { accountId in
-                        if let accountId {
-                            if let account = accounts.first(where: { $0.id == accountId }) {
-                                selectedAccount = account
-                                selectedCategory = nil
-                                Task { await switchToAccount(account) }
-                            }
-                        } else {
-                            selectedAccount = nil
-                            selectedFolder = nil
-                            selectedCategory = nil
-                            Task { await reloadThreads() }
-                        }
-                    }
-                )
+                accountSwitcherSheet
             }
         }
         .task {
@@ -269,6 +243,63 @@ struct ThreadListView: View {
         .onDisappear {
             stopIDLEMonitor()
         }
+    }
+
+    // MARK: - Extracted Sheets & Destinations
+
+    @ViewBuilder
+    private func tabDestinationView(for destination: TabDestination) -> some View {
+        switch destination {
+        case .search:
+            SearchPlaceholder()
+        case .settings:
+            SettingsView(manageAccounts: manageAccounts, modelManager: modelManager, aiEngineResolver: aiEngineResolver)
+        case .aiChat:
+            if let resolver = aiEngineResolver {
+                AIChatView(engineResolver: resolver)
+            } else {
+                Text("AI not available")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func composerSheet(for mode: ComposerMode) -> some View {
+        ComposerView(
+            composeEmail: composeEmail,
+            queryContacts: queryContacts,
+            smartReply: smartReply ?? SmartReplyUseCase(aiRepository: StubAIRepository()),
+            mode: mode,
+            accounts: accounts,
+            onDismiss: { result in
+                composerMode = nil
+                handleComposerDismiss(result)
+            }
+        )
+        .environment(settings)
+    }
+
+    @ViewBuilder
+    private var accountSwitcherSheet: some View {
+        AccountSwitcherSheet(
+            accounts: accounts,
+            selectedAccountId: selectedAccount?.id,
+            onSelectAccount: { accountId in
+                if let accountId {
+                    if let account = accounts.first(where: { $0.id == accountId }) {
+                        selectedAccount = account
+                        selectedCategory = nil
+                        Task { await switchToAccount(account) }
+                    }
+                } else {
+                    selectedAccount = nil
+                    selectedFolder = nil
+                    selectedCategory = nil
+                    Task { await reloadThreads() }
+                }
+            }
+        )
     }
 
     // MARK: - Content View
@@ -336,14 +367,16 @@ struct ThreadListView: View {
         .refreshable {
             errorBannerMessage = nil
             // Sync current folder from IMAP, then reload from SwiftData
+            var syncedEmails: [Email] = []
             if let accountId = selectedAccount?.id, let folderId = selectedFolder?.id {
                 do {
-                    try await syncEmails.syncFolder(accountId: accountId, folderId: folderId)
+                    syncedEmails = try await syncEmails.syncFolder(accountId: accountId, folderId: folderId)
                 } catch {
                     errorBannerMessage = "Sync failed: \(error.localizedDescription)"
                 }
             }
             await reloadThreads()
+            runAIClassification(for: syncedEmails)
         }
         .navigationDestination(for: String.self) { threadId in
             EmailDetailView(
@@ -352,8 +385,8 @@ struct ThreadListView: View {
                 markRead: markRead,
                 manageThreadActions: manageThreadActions,
                 downloadAttachment: downloadAttachment,
-                summarizeThread: nil,
-                smartReply: nil,
+                summarizeThread: summarizeThread,
+                smartReply: smartReply,
                 composeEmail: composeEmail,
                 queryContacts: queryContacts,
                 accounts: accounts
@@ -642,7 +675,7 @@ struct ThreadListView: View {
             NSLog("[UI] Starting background sync for account: \(firstAccount.id)")
             Task {
                 do {
-                    try await syncEmails.syncAccount(accountId: firstAccount.id)
+                    let syncedEmails = try await syncEmails.syncAccount(accountId: firstAccount.id)
                     NSLog("[UI] Background sync succeeded, reloading threads...")
                     // Sync succeeded — reload folders and threads with fresh data
                     folders = try await fetchThreads.fetchFolders(accountId: firstAccount.id)
@@ -652,6 +685,9 @@ struct ThreadListView: View {
                     }
                     await loadThreadsAndCounts()
                     NSLog("[UI] Threads reloaded, count: \(threads.count)")
+
+                    // Phase 2.5: Run AI classification on ALL synced emails
+                    runAIClassification(for: syncedEmails)
 
                     // Phase 3: Start IMAP IDLE for real-time inbox updates (FR-SYNC-03)
                     startIDLEMonitor()
@@ -694,8 +730,9 @@ struct ThreadListView: View {
                     case .newMail:
                         NSLog("[IDLE] New mail notification, syncing folder...")
                         if let folderId = selectedFolder?.id {
-                            try? await syncEmails.syncFolder(accountId: accountId, folderId: folderId)
+                            let syncedEmails = (try? await syncEmails.syncFolder(accountId: accountId, folderId: folderId)) ?? []
                             await loadThreadsAndCounts()
+                            runAIClassification(for: syncedEmails)
                         }
                         retryDelay = .seconds(2) // reset on success
                     case .disconnected:
@@ -988,6 +1025,26 @@ struct ThreadListView: View {
         case .discarded, .cancelled:
             break
         }
+    }
+
+    // MARK: - AI Classification
+
+    /// Enqueue newly synced emails for AI processing.
+    ///
+    /// Accepts the complete list of newly synced emails from the sync use case,
+    /// ensuring ALL synced emails are processed — not just the currently loaded
+    /// thread page. The queue itself filters to uncategorized-only.
+    /// Sorted oldest→newest so the most recent email is processed last,
+    /// ensuring Thread.aiCategory reflects the latest email's category.
+    ///
+    /// Spec ref: FR-AI-07, AC-A-04b
+    private func runAIClassification(for syncedEmails: [Email]) {
+        guard let queue = aiProcessingQueue else { return }
+        let sorted = syncedEmails
+            .sorted { ($0.dateReceived ?? .distantPast) < ($1.dateReceived ?? .distantPast) }
+        guard !sorted.isEmpty else { return }
+        NSLog("[AI] Enqueuing \(sorted.count) synced emails for AI classification")
+        queue.enqueue(emails: sorted)
     }
 
     // MARK: - Helpers
