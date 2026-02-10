@@ -101,7 +101,7 @@ SwiftData wraps Core Data which wraps SQLite, but it does NOT expose:
   - Recent searches (last 10, persisted in UserDefaults)
   - Suggested searches based on top 5 frequent contacts
 - The client **MUST** show `ContentUnavailableView.search` when no results match.
-- The client **MUST** display result count ("N results" text below search bar).
+- The client **MUST** display result count as thread count ("N conversations" text below search bar), since results are grouped by thread.
 
 ### FR-SEARCH-02: Search Filters
 
@@ -206,7 +206,10 @@ v       v                        |
 - When `SyncEmailsUseCase` inserts new emails, it **MUST** also:
   1. Insert into FTS5 table (subject + body + sender)
   2. Generate embedding via `GenerateEmbeddingUseCase` and store in `SearchIndex.embedding`
-- When emails are deleted, corresponding FTS5 and SearchIndex entries **MUST** be removed.
+- When an email is deleted, `SearchIndexManager` **MUST** delete the corresponding FTS5 row by email_id and the SearchIndex SwiftData entry by emailId.
+- When an account is deleted, `SearchIndexManager` **MUST** bulk-delete all FTS5 rows where account_id matches and all SearchIndex entries where accountId matches.
+- When sync reconciliation detects server-missing emails, `SearchIndexManager` **MUST** clean up orphaned FTS5 and SearchIndex entries.
+- Folder deletion does NOT require FTS5/SearchIndex cleanup (emails survive folder removal; only EmailFolder associations are affected).
 - The client **SHOULD** support a one-time full reindex for existing emails (Settings > "Rebuild Search Index").
 - The client **SHOULD** auto-detect unindexed emails on first Search tab open and index progressively in background.
 - Index build **MUST NOT** block the UI — all indexing runs on background actors.
@@ -277,6 +280,8 @@ public final class SearchIndex {
     public var embedding: Data?     // 384-dim Float32 vector, pre-L2-normalized (1536 bytes)
 }
 ```
+
+> **Migration note**: Adding `accountId` is a lightweight SwiftData schema migration (additive property with default value `""`). Existing SearchIndex entries will have `accountId = ""` after migration and **MUST** be backfilled on first app launch after upgrade by joining SearchIndex.emailId to Email.accountId in batch. Guard with UserDefaults flag to run once.
 
 ### 6.2 New: FTS5 Table (separate search.sqlite)
 

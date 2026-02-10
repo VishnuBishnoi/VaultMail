@@ -19,7 +19,7 @@ updated: 2026-02-10
 
 - `SearchIndex` SwiftData model exists (Domain/Models) — needs `accountId` field added
 - `SearchRepositoryProtocol` defined (Domain/Protocols) with `search()`, `indexEmail()`, `removeFromIndex()` — needs expansion for hybrid search API
-- `AIRepositoryImpl.generateEmbedding()` exists with FNV-1a hash-based 128D fallback — needs CoreML MiniLM for real 384D embeddings
+- `AIRepositoryImpl.generateEmbedding()` exists with FNV-1a hash-based 128D fallback — will be replaced by `CoreMLClassifier.embed()` returning 384D or nil
 - `SearchPlaceholder.swift` shows "Search coming soon" placeholder — will be replaced by `SearchView`
 - `AIProcessingQueue` has `generateEmbeddings()` hook — ready to wire
 - `ThreadListView` has search tab wired to `SearchPlaceholder` — needs rewiring to `SearchView`
@@ -74,18 +74,18 @@ updated: 2026-02-10
 - **Status**: `todo`
 - **Spec ref**: FR-SEARCH-07
 - **Validation ref**: AC-S-06, AC-S-08
-- **Description**: CoreML embedding engine wrapper + domain use case for generating query and batch embeddings. Falls back to hash embeddings if CoreML model is unavailable.
+- **Description**: `CoreMLClassifier` wrapper (AI spec Section 7.1) + domain use case for generating query and batch embeddings. Returns nil when CoreML model is unavailable; search falls back to FTS5-only per AI spec Section 7.2.
 - **Deliverables**:
-  - [ ] `CoreMLEmbeddingEngine.swift` — load MiniLM model, tokenize input, run inference on ANE, return 384-dim Float32 array
+  - [ ] `CoreMLClassifier.swift` — per AI spec Section 7.1: load MiniLM model for `embed()`, return 384-dim Float32 array. `classify()` and `detectSpam()` stubbed for Phase 6.
   - [ ] `GenerateEmbeddingUseCase.swift` — domain use case
     - Single query embedding (for search)
     - Batch embedding (for indexing during sync)
     - L2 normalization of output vectors
-    - Fallback to FNV-1a hash embedding if model unavailable
+    - Return nil if model unavailable (FTS5-only fallback per AI spec 7.2)
   - [ ] Unit tests: GenerateEmbeddingUseCaseTests (4+ tests)
     - Single embedding generation
     - Batch embedding generation
-    - Hash fallback when model unavailable
+    - Nil return when model unavailable
     - Output dimension validation (384)
 
 ---
@@ -97,20 +97,30 @@ updated: 2026-02-10
 - **Validation ref**: AC-S-09
 - **Description**: Incremental search index management during sync, and in-memory vector search engine for semantic similarity.
 - **Deliverables**:
-  - [ ] Update `SearchIndex.swift` — add `accountId: String` field
+  - [ ] Update `SearchIndex.swift` — add `accountId: String = ""` (lightweight SwiftData migration with default)
+  - [ ] Implement `SearchIndexManager.backfillAccountIds()`:
+    - Fetch all SearchIndex entries where accountId is empty string
+    - For each, fetch corresponding Email by emailId, set accountId from email.accountId
+    - Batch save (100 entries per save)
+    - Wire into app startup with UserDefaults guard (`searchIndexAccountIdBackfillComplete`)
+  - [ ] Update `AIProcessingQueue.generateEmbeddings()` to set `accountId` on new SearchIndex entries
   - [ ] `SearchIndexManager.swift` — actor managing incremental indexing
     - On new email sync: insert into FTS5 + generate embedding + upsert SearchIndex
-    - On email delete: remove from FTS5 + remove SearchIndex
+    - On email delete: `removeEmail(emailId:)` — delete FTS5 row + delete SearchIndex entry
+    - On account delete: `removeAllForAccount(accountId:)` — bulk-delete FTS5 rows + SearchIndex entries by accountId
+    - On sync reconciliation: clean up orphaned FTS5/SearchIndex entries for server-missing emails
     - Auto-detect unindexed emails and index progressively in background
     - Full reindex capability (for Settings > "Rebuild Search Index")
     - Wire into `SyncEmailsUseCase` sync pipeline
     - Wire into `AIProcessingQueue` batch processing
+  - [ ] Wire `removeEmail()` into `EmailRepositoryImpl.deleteEmail()`
+  - [ ] Wire `removeAllForAccount()` into `AccountRepositoryImpl.removeAccount()`
   - [ ] `VectorSearchEngine.swift` — in-memory cosine similarity
     - Load pre-normalized embeddings from SwiftData SearchIndex entries
     - Brute-force dot product for cosine similarity
     - Return top-50 results by similarity score
     - Account-scoped loading for memory efficiency
-  - [ ] Unit tests: SearchIndexManagerTests (6+ tests), VectorSearchEngineTests (5+ tests)
+  - [ ] Unit tests: SearchIndexManagerTests (8+ tests including deletion + backfill), VectorSearchEngineTests (5+ tests)
 
 ---
 

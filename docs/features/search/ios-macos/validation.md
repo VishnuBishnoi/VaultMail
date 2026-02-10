@@ -19,18 +19,19 @@ last-validated: null
 
 | Req ID | Requirement Summary | Keyword | Test Case IDs | Platform | Status |
 |--------|-------------------|---------|---------------|----------|--------|
-| FR-SEARCH-01 | Search interface | MUST | AC-S-01, AC-S-02 | Both | — |
-| FR-SEARCH-02 | Search filters | MUST | AC-S-03 | Both | — |
-| FR-SEARCH-03 | Search scopes | MUST | AC-S-04 | Both | — |
-| FR-SEARCH-04 | NL query parsing | MUST | AC-S-05 | Both | — |
-| FR-SEARCH-05 | Hybrid search architecture | MUST | AC-S-06 | Both | — |
-| FR-SEARCH-06 | FTS5 full-text index | MUST | AC-S-07 | Both | — |
-| FR-SEARCH-07 | Semantic embedding search | MUST | AC-S-08 | Both | — |
-| FR-SEARCH-08 | Search index management | MUST | AC-S-09 | Both | — |
-| FR-SEARCH-09 | Recent searches | MUST | AC-S-10 | Both | — |
-| NFR-SEARCH-01 | Search performance | MUST | AC-S-11 | Both | — |
-| NFR-SEARCH-03 | Accessibility | MUST | AC-S-12 | Both | — |
-| NFR-SEARCH-04 | Offline behavior | MUST | AC-S-13 | Both | — |
+| FR-SEARCH-01 | Search interface | MUST | AC-S-01, AC-S-02 | iOS | — |
+| FR-SEARCH-02 | Search filters | MUST | AC-S-03 | iOS | — |
+| FR-SEARCH-03 | Search scopes | MUST | AC-S-04 | iOS | — |
+| FR-SEARCH-04 | NL query parsing | MUST | AC-S-05 | iOS | — |
+| FR-SEARCH-05 | Hybrid search architecture | MUST | AC-S-06 | iOS | — |
+| FR-SEARCH-06 | FTS5 full-text index | MUST | AC-S-07 | iOS | — |
+| FR-SEARCH-07 | Semantic embedding search | MUST | AC-S-08 | iOS | — |
+| FR-SEARCH-08 | Search index management | MUST | AC-S-09 | iOS | — |
+| FR-SEARCH-09 | Recent searches | MUST | AC-S-10 | iOS | — |
+| NFR-SEARCH-01 | Search performance | MUST | AC-S-11 | iOS | — |
+| NFR-SEARCH-02 | Storage budget | SHOULD | AC-S-14 | iOS | — |
+| NFR-SEARCH-03 | Accessibility | MUST | AC-S-12 | iOS | — |
+| NFR-SEARCH-04 | Offline behavior | MUST | AC-S-13 | iOS | — |
 
 ---
 
@@ -47,7 +48,7 @@ last-validated: null
   - Results **MUST** display as a thread list matching `ThreadListView` format
   - Matching terms ("project", "update") **MUST** be highlighted in subject and snippet
   - Tapping a result **MUST** navigate to `EmailDetailView`
-  - Result count **MUST** be displayed (e.g., "15 results")
+  - Result count **MUST** be displayed as thread count (e.g., "15 conversations")
 - **Priority**: High
 
 ---
@@ -110,9 +111,9 @@ last-validated: null
 - **Given**: 1000 synced and indexed emails, including one about "quarterly budget review"
 - **When**: The user searches for "financial planning meeting"
 - **Then**:
-  - The email about "quarterly budget review" **MUST** appear in search results (semantic match)
+  - The email about "quarterly budget review" **SHOULD** appear in the top-20 results (semantic match). If the embedding model produces low-quality results, keyword matches alone **MUST** still be returned.
   - Results **MUST** be ranked by relevance (RRF fusion score)
-  - Both keyword matches and semantic matches **MUST** appear
+  - When embeddings are available, results **SHOULD** include both keyword and semantic matches
 - **Priority**: High
 
 ---
@@ -151,6 +152,9 @@ last-validated: null
 - **Given**: An email is deleted
 - **When**: The deletion is processed
 - **Then**: The email **MUST** be removed from both FTS5 and SearchIndex
+- **Given**: An account with 100 indexed emails is deleted
+- **When**: The account deletion completes
+- **Then**: All 100 FTS5 entries for that account **MUST** be removed AND all 100 SearchIndex entries **MUST** be removed
 - **Priority**: High
 
 ---
@@ -210,8 +214,22 @@ last-validated: null
 - **Then**:
   - Search **MUST** work normally (all data is local)
   - No network error **MUST** be shown
-  - Both FTS5 and semantic results **MUST** be returned
+  - FTS5 keyword results **MUST** be returned
+  - Semantic results **MUST** be returned if the embedding model is available and embeddings have been generated for the corpus
+  - If embeddings are unavailable, FTS5 keyword results **MUST** still be returned with no error (consistent with AC-S-08)
 - **Priority**: Medium
+
+---
+
+**AC-S-14**: Storage Budget Validation
+
+- **Given**: 50,000 synced and indexed emails with FTS5 + embeddings
+- **When**: The user views Settings > Storage
+- **Then**:
+  - FTS5 index size **SHOULD** be reported and **SHOULD** be approximately 50MB
+  - Embedding storage **SHOULD** be reported and **SHOULD** be approximately 75MB
+  - The FTS5 database **MUST** be stored in the app's Application Support directory
+- **Priority**: Low
 
 ---
 
@@ -271,7 +289,7 @@ Refer to Foundation validation Section 5 for shared device test matrix. Addition
 | SearchQueryParser | 10 | Sender, date, attachment, category, read, mixed, empty, edge cases |
 | SearchEmailsUseCase | 8 | Keyword-only, semantic-only, hybrid, filters, scope, fallback, empty |
 | GenerateEmbeddingUseCase | 4 | Single, batch, fallback, model unavailable |
-| SearchIndexManager | 6 | Index on sync, delete, reindex, concurrent access |
+| SearchIndexManager | 8 | Index on sync, delete email, delete account, backfill accountId, reindex, concurrent access |
 
 ---
 

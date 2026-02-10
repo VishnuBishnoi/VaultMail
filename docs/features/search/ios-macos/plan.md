@@ -63,7 +63,7 @@ Refer to Foundation plan Section 2. Search is fully local (no server-side IMAP S
 | File | Layer | Purpose |
 |------|-------|---------|
 | `all-MiniLM-L6-v2.mlpackage` | Resources | CoreML embedding model (384-dim, 50MB, bundled) |
-| `CoreMLEmbeddingEngine.swift` | Data/AI | CoreML wrapper for MiniLM embedding inference |
+| `CoreMLClassifier.swift` | Data/AI | CoreML wrapper per AI spec Section 7.1 — implements embed() for search; classify()/detectSpam() stubbed for Phase 6 |
 
 ### Existing Files to Modify
 
@@ -74,7 +74,9 @@ Refer to Foundation plan Section 2. Search is fully local (no server-side IMAP S
 | `SearchPlaceholder.swift` | Replace with `SearchView` |
 | `ContentView.swift` / tab navigation | Wire `SearchView` into Search tab |
 | `SyncEmailsUseCase.swift` | Hook `SearchIndexManager` for incremental indexing |
-| `AIProcessingQueue.swift` | Wire embedding generation during batch processing |
+| `AIProcessingQueue.swift` | Wire embedding generation during batch processing; set `accountId` on new SearchIndex entries |
+| `EmailRepositoryImpl.swift` | Hook `SearchIndexManager.removeEmail()` in `deleteEmail()` |
+| `AccountRepositoryImpl.swift` | Hook `SearchIndexManager.removeAllForAccount()` in `removeAccount()` |
 
 ---
 
@@ -92,8 +94,8 @@ Refer to Foundation plan Section 2. Search is fully local (no server-side IMAP S
 | Task | Description | Dependencies |
 |------|-------------|-------------|
 | IOS-A-01b | Bundle all-MiniLM-L6-v2 CoreML model (.mlpackage) in SPM resources | None |
-| IOS-A-16a | `CoreMLEmbeddingEngine` — load model, tokenize text, run inference, return 384-dim Float32 | IOS-A-01b |
-| IOS-A-16b | `GenerateEmbeddingUseCase` — single query + batch embedding with CoreML → hash fallback | IOS-A-16a |
+| IOS-A-16a | `CoreMLClassifier` (embed() method per AI spec Section 7.1) — load MiniLM model, tokenize text, run inference, return 384-dim Float32 | IOS-A-01b |
+| IOS-A-16b | `GenerateEmbeddingUseCase` — single query + batch embedding with CoreML → nil (FTS5-only fallback) | IOS-A-16a |
 | IOS-A-16c | Unit tests for embedding generation (model loaded, output dimensions, normalization) | IOS-A-16b |
 
 ### Phase 3: Search Index & Vector Search (IOS-A-15)
@@ -159,7 +161,7 @@ IOS-A-18 (Search UI)
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| CoreML model conversion issues | Medium | High | Test .mlpackage early; fall back to hash embeddings if conversion fails |
+| CoreML model conversion issues | Medium | High | Test .mlpackage early; fall back to FTS5-only keyword search if conversion fails |
 | FTS5 not available in iOS SQLite | Low | High | iOS bundles SQLite with FTS5 enabled by default since iOS 8 |
 | Memory pressure from in-memory vectors (50K+ emails) | Medium | Medium | Lazy loading by account; unload when Search tab not visible |
 | BM25 ranking quality for email content | Low | Low | Email text is well-structured (subject, body, sender); BM25 works well |
