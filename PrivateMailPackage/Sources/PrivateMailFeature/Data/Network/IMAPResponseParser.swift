@@ -168,7 +168,8 @@ enum IMAPResponseParser {
                 subject: headerFields["subject"].map { MIMEDecoder.decodeHeaderValue($0) },
                 date: parseIMAPDate(headerFields["date"]),
                 flags: flags,
-                size: size
+                size: size,
+                authenticationResults: headerFields["authentication-results"]
             )
 
             headers.append(header)

@@ -367,15 +367,16 @@ struct ThreadListView: View {
         .refreshable {
             errorBannerMessage = nil
             // Sync current folder from IMAP, then reload from SwiftData
+            var syncedEmails: [Email] = []
             if let accountId = selectedAccount?.id, let folderId = selectedFolder?.id {
                 do {
-                    try await syncEmails.syncFolder(accountId: accountId, folderId: folderId)
+                    syncedEmails = try await syncEmails.syncFolder(accountId: accountId, folderId: folderId)
                 } catch {
                     errorBannerMessage = "Sync failed: \(error.localizedDescription)"
                 }
             }
             await reloadThreads()
-            runAIClassification()
+            runAIClassification(for: syncedEmails)
         }
         .navigationDestination(for: String.self) { threadId in
             EmailDetailView(
@@ -674,7 +675,7 @@ struct ThreadListView: View {
             NSLog("[UI] Starting background sync for account: \(firstAccount.id)")
             Task {
                 do {
-                    try await syncEmails.syncAccount(accountId: firstAccount.id)
+                    let syncedEmails = try await syncEmails.syncAccount(accountId: firstAccount.id)
                     NSLog("[UI] Background sync succeeded, reloading threads...")
                     // Sync succeeded — reload folders and threads with fresh data
                     folders = try await fetchThreads.fetchFolders(accountId: firstAccount.id)
@@ -685,8 +686,8 @@ struct ThreadListView: View {
                     await loadThreadsAndCounts()
                     NSLog("[UI] Threads reloaded, count: \(threads.count)")
 
-                    // Phase 2.5: Run AI classification on synced emails
-                    runAIClassification()
+                    // Phase 2.5: Run AI classification on ALL synced emails
+                    runAIClassification(for: syncedEmails)
 
                     // Phase 3: Start IMAP IDLE for real-time inbox updates (FR-SYNC-03)
                     startIDLEMonitor()
@@ -729,9 +730,9 @@ struct ThreadListView: View {
                     case .newMail:
                         NSLog("[IDLE] New mail notification, syncing folder...")
                         if let folderId = selectedFolder?.id {
-                            try? await syncEmails.syncFolder(accountId: accountId, folderId: folderId)
+                            let syncedEmails = (try? await syncEmails.syncFolder(accountId: accountId, folderId: folderId)) ?? []
                             await loadThreadsAndCounts()
-                            runAIClassification()
+                            runAIClassification(for: syncedEmails)
                         }
                         retryDelay = .seconds(2) // reset on success
                     case .disconnected:
@@ -1028,19 +1029,22 @@ struct ThreadListView: View {
 
     // MARK: - AI Classification
 
-    /// Enqueue uncategorized emails from currently loaded threads for AI processing.
+    /// Enqueue newly synced emails for AI processing.
     ///
-    /// Called after sync completes to trigger background AI classification.
-    /// The queue itself filters to uncategorized-only, so we can pass all emails.
+    /// Accepts the complete list of newly synced emails from the sync use case,
+    /// ensuring ALL synced emails are processed — not just the currently loaded
+    /// thread page. The queue itself filters to uncategorized-only.
     /// Sorted oldest→newest so the most recent email is processed last,
     /// ensuring Thread.aiCategory reflects the latest email's category.
-    private func runAIClassification() {
+    ///
+    /// Spec ref: FR-AI-07, AC-A-04b
+    private func runAIClassification(for syncedEmails: [Email]) {
         guard let queue = aiProcessingQueue else { return }
-        let allEmails = threads.flatMap(\.emails)
+        let sorted = syncedEmails
             .sorted { ($0.dateReceived ?? .distantPast) < ($1.dateReceived ?? .distantPast) }
-        guard !allEmails.isEmpty else { return }
-        NSLog("[AI] Enqueuing \(allEmails.count) emails for AI classification")
-        queue.enqueue(emails: allEmails)
+        guard !sorted.isEmpty else { return }
+        NSLog("[AI] Enqueuing \(sorted.count) synced emails for AI classification")
+        queue.enqueue(emails: sorted)
     }
 
     // MARK: - Helpers

@@ -159,7 +159,7 @@ public actor IMAPClient: IMAPClientProtocol {
         guard !uids.isEmpty else { return [] }
 
         let uidSet = uids.map(String.init).joined(separator: ",")
-        let headerFields = "FROM TO CC BCC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES"
+        let headerFields = "FROM TO CC BCC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES AUTHENTICATION-RESULTS"
         let command = "UID FETCH \(uidSet) (UID FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (\(headerFields))])"
 
         let responses = try await session.execute(command)

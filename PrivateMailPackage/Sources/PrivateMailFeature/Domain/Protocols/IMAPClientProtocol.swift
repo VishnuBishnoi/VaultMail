@@ -60,6 +60,10 @@ public struct IMAPEmailHeader: Sendable, Equatable {
     public let flags: [String]
     /// RFC822.SIZE
     public let size: UInt32
+    /// Authentication-Results header (SPF/DKIM/DMARC).
+    /// Populated from the IMAP FETCH for spam/phishing analysis.
+    /// Spec ref: FR-AI-06 (header authentication signal)
+    public let authenticationResults: String?
 
     public init(
         uid: UInt32,
@@ -73,7 +77,8 @@ public struct IMAPEmailHeader: Sendable, Equatable {
         subject: String?,
         date: Date?,
         flags: [String] = [],
-        size: UInt32 = 0
+        size: UInt32 = 0,
+        authenticationResults: String? = nil
     ) {
         self.uid = uid
         self.messageId = messageId
@@ -87,6 +92,7 @@ public struct IMAPEmailHeader: Sendable, Equatable {
         self.date = date
         self.flags = flags
         self.size = size
+        self.authenticationResults = authenticationResults
     }
 }
 

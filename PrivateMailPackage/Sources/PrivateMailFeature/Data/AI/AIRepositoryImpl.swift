@@ -137,14 +137,42 @@ public final class AIRepositoryImpl: AIRepositoryProtocol {
         )
 
         // Enforce 8-second hard limit per spec FR-AI-03.
-        // If the model is slow, we parse whatever partial response we have.
-        let deadline = Date().addingTimeInterval(Self.smartReplyTimeout)
-        let stream = await engine.generate(prompt: prompt, maxTokens: 300)
-        var response = ""
-        for await token in stream {
-            response += token
-            // Check 8s budget after each token
-            if Date() >= deadline { break }
+        // LlamaEngine.generate() computes all tokens synchronously within the
+        // actor before returning the stream, so a per-token deadline check
+        // cannot actually cut generation short. Instead, we race the entire
+        // generation against a sleep timer using a TaskGroup — whichever
+        // finishes first wins, and the other is cancelled.
+        let timeout = Self.smartReplyTimeout
+        let response: String = await withTaskGroup(of: String?.self) { group in
+            // Child 1: Generation
+            group.addTask {
+                let stream = await engine.generate(prompt: prompt, maxTokens: 300)
+                var result = ""
+                for await token in stream {
+                    guard !Task.isCancelled else { break }
+                    result += token
+                }
+                return result
+            }
+
+            // Child 2: Timeout
+            group.addTask {
+                try? await Task.sleep(for: .seconds(timeout))
+                return nil  // signals timeout
+            }
+
+            // First child to finish determines the result.
+            // If the timeout fires first (returns nil), cancel the group
+            // which cancels the generation task.
+            var result = ""
+            if let first = await group.next() {
+                if let generated = first {
+                    result = generated
+                }
+                // else: timeout fired first — result stays empty
+            }
+            group.cancelAll()
+            return result
         }
 
         let replies = PromptTemplates.parseSmartReplyResponse(response)
@@ -152,21 +180,82 @@ public final class AIRepositoryImpl: AIRepositoryProtocol {
     }
 
     public func generateEmbedding(text: String) async throws -> Data {
+        // First, try the engine's native embed() (CoreML MiniLM when available).
         let engine = await engineResolver.resolveGenerativeEngine()
-        let available = await engine.isAvailable()
-
-        guard available else {
-            return Data()
-        }
-
-        do {
-            let floats = try await engine.embed(text: text)
-            // Convert [Float] to Data
-            return floats.withUnsafeBufferPointer { buffer in
-                Data(buffer: buffer)
+        if await engine.isAvailable() {
+            do {
+                let floats = try await engine.embed(text: text)
+                if !floats.isEmpty {
+                    return floats.withUnsafeBufferPointer { buffer in
+                        Data(buffer: buffer)
+                    }
+                }
+            } catch {
+                // embed() unsupported by this engine — fall through to hash embedding
             }
-        } catch {
-            return Data()
         }
+
+        // Fallback: deterministic hash-based embedding (128-dimensional).
+        // Produces a lightweight vector from word hashes, providing basic
+        // similarity signals for SearchIndex until CoreML MiniLM is integrated.
+        // This ensures SearchIndex entries always get non-nil embeddings.
+        let embedding = Self.hashEmbedding(text: text)
+        return embedding.withUnsafeBufferPointer { buffer in
+            Data(buffer: buffer)
+        }
+    }
+
+    // MARK: - Hash Embedding Fallback
+
+    /// Dimension of the fallback hash embedding vector.
+    private static let embeddingDimension = 128
+
+    /// Generate a deterministic hash-based embedding from text.
+    ///
+    /// Tokenizes the text into lowercased words, hashes each word, and
+    /// accumulates into a fixed-dimension vector. The result is L2-normalized.
+    /// This provides basic bag-of-words similarity until CoreML MiniLM
+    /// is available for proper semantic embeddings.
+    ///
+    /// Spec ref: FR-AI-05 (fallback path)
+    static func hashEmbedding(text: String) -> [Float] {
+        let dim = embeddingDimension
+        var vector = [Float](repeating: 0.0, count: dim)
+
+        // Tokenize: split on non-alphanumeric, lowercase, filter short words
+        let words = text.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count >= 2 }
+
+        guard !words.isEmpty else {
+            return vector
+        }
+
+        for word in words {
+            // Use two independent hashes per word for better distribution
+            var hasher1 = Hasher()
+            hasher1.combine(word)
+            hasher1.combine(0)
+            let h1 = abs(hasher1.finalize()) % dim
+
+            var hasher2 = Hasher()
+            hasher2.combine(word)
+            hasher2.combine(1)
+            let h2 = hasher2.finalize()
+
+            // +1 or -1 based on second hash (random sign trick)
+            let sign: Float = h2 % 2 == 0 ? 1.0 : -1.0
+            vector[h1] += sign
+        }
+
+        // L2-normalize
+        let norm = sqrt(vector.reduce(0) { $0 + $1 * $1 })
+        if norm > 0 {
+            for i in 0..<dim {
+                vector[i] /= norm
+            }
+        }
+
+        return vector
     }
 }
