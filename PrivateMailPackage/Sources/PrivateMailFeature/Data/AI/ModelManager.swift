@@ -65,8 +65,8 @@ public actor ModelManager {
             name: "Qwen3 1.7B Instruct",
             fileName: "Qwen3-1.7B-Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf")!,
-            size: 1_110_000_000,   // ~1.11 GB
-            sha256: "",            // TODO: Fill with actual checksum after first download verification
+            size: 1_107_409_472,   // ~1.11 GB (exact from HuggingFace LFS)
+            sha256: "b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897",
             license: "Apache 2.0",
             minRAMGB: 6
         ),
@@ -75,8 +75,8 @@ public actor ModelManager {
             name: "Qwen3 0.6B",
             fileName: "Qwen3-0.6B-Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf")!,
-            size: 397_000_000,     // ~397 MB
-            sha256: "",            // TODO: Fill with actual checksum after first download verification
+            size: 396_705_472,     // ~397 MB (exact from HuggingFace LFS)
+            sha256: "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a",
             license: "Apache 2.0",
             minRAMGB: 4
         ),
@@ -203,6 +203,15 @@ public actor ModelManager {
                 )
             }
 
+            // If server returned 200 (full file) instead of 206 (partial),
+            // the Range header was ignored — truncate partial file to avoid
+            // appending the full content onto existing bytes (corruption).
+            let isResumed = httpResponse.statusCode == 206
+            if existingBytes > 0 && !isResumed {
+                try? fileManager.removeItem(at: partialPath)
+                existingBytes = 0
+            }
+
             let totalBytes = (httpResponse.expectedContentLength > 0)
                 ? httpResponse.expectedContentLength + existingBytes
                 : Int64(info.size)
@@ -212,7 +221,7 @@ public actor ModelManager {
                 fileManager.createFile(atPath: partialPath.path, contents: nil)
             }
             let fileHandle = try FileHandle(forWritingTo: partialPath)
-            if existingBytes > 0 {
+            if isResumed && existingBytes > 0 {
                 fileHandle.seekToEndOfFile()
             }
 

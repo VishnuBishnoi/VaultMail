@@ -189,8 +189,10 @@ struct AIChatView: View {
                 return
             }
 
-            // Build conversation history for the prompt
-            let history: [(role: String, content: String)] = messages.dropLast().map { msg in
+            // Build conversation history for the prompt.
+            // Drop the last 2 messages (placeholder assistant + new user) since
+            // PromptTemplates.chat() appends the userMessage itself.
+            let history: [(role: String, content: String)] = messages.dropLast(2).map { msg in
                 (role: msg.role == .user ? "User" : "Assistant", content: msg.text)
             }
             let prompt = PromptTemplates.chat(
