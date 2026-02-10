@@ -466,7 +466,7 @@ struct SearchView: View {
 |---|----------|------------|
 | 1 | FTS5 access layer | **Raw SQLite C API** — no dependency, consistent with llama.cpp C API usage |
 | 2 | Vector search approach | **In-memory brute force** — sufficient for <100K emails, simpler than sqlite-vec |
-| 3 | CoreML model scope | **MiniLM bundled for search**; DistilBERT bundling is defined by AI spec Section 5.4 and tracked under AI classification tasks (IOS-A-01b). CoreMLClassifier.swift is shared — search implements embed(), classification implements classify()/detectSpam() |
+| 3 | CoreML model scope | **MiniLM bundled for search**; DistilBERT bundling is defined by AI spec Section 5.4 and tracked under AI classification tasks (AI task IOS-A-01b). CoreMLClassifier.swift is shared — search implements embed(), classification implements classify()/detectSpam() |
 | 4 | Reindex trigger | **Auto-detect** on first Search tab open; index progressively in background |
 | 5 | Search tab placement | **Keep dedicated tab** — existing tab wired; add `.searchable()` within it |
 

@@ -11,7 +11,7 @@ updated: 2026-02-10
 
 > Each task references its plan ID, spec section, and acceptance criteria. Status values: `todo`, `in-progress`, `done`, `blocked`.
 
-> **This is the only unlocked feature document.** All other feature documents (email sync, composer, AI phases 1–3+5, polish, macOS adaptation) are complete and locked. Search is the remaining major work item. AI Phase 4 tasks (IOS-A-14..17) and IOS-A-01b are forward-references to this document — see cross-reference note below.
+> **This is the only unlocked feature document.** All other feature documents (email sync, composer, AI phases 1–3+5, polish, macOS adaptation) are complete and locked. Search is the remaining major work item. AI Phase 4 forward-references (IOS-A-14..17, IOS-A-01b) are superseded by Search tasks IOS-S-00..05 — see ID note below.
 
 ---
 
@@ -24,11 +24,11 @@ updated: 2026-02-10
 - `AIProcessingQueue` has `generateEmbeddings()` hook — ready to wire
 - `ThreadListView` has search tab wired to `SearchPlaceholder` — needs rewiring to `SearchView`
 
-> **Task ID cross-reference**: IOS-A-14 through IOS-A-17 are declared in AI Features tasks (Phase 4) as forward-references to this Search plan. The definitions below are the canonical, detailed specifications for these tasks. IOS-A-18 (Search UI) is Search-only. See AI tasks.md line 337.
+> **Task ID note**: AI Features tasks (Phase 4) define skeletal forward-references for search backend work under IDs IOS-A-14..17 (see AI tasks.md line 337). To avoid ID collision with the locked AI docs, Search uses its own namespace: IOS-S-00 through IOS-S-05. The AI forward-references are superseded by the detailed definitions below.
 
 ---
 
-### IOS-A-14: FTS5 Foundation
+### IOS-S-01: FTS5 Foundation
 
 - **Status**: `todo`
 - **Spec ref**: FR-SEARCH-06
@@ -57,12 +57,12 @@ updated: 2026-02-10
 
 ---
 
-### IOS-A-01b: CoreML Model Bundling (MiniLM — Search Scope)
+### IOS-S-00: CoreML Model Bundling (MiniLM — Search Scope)
 
 - **Status**: `todo`
 - **Spec ref**: FR-SEARCH-07, Search spec Section 3.2
 - **Validation ref**: AC-S-06
-- **Description**: Bundle all-MiniLM-L6-v2 CoreML model (.mlpackage) as SPM resource for 384-dim embedding generation. ~50MB bundled model. DistilBERT model bundling is defined by AI spec Section 5.4 and tracked under AI classification tasks. AI tasks IOS-A-01b has broader scope (DistilBERT + MiniLM); this Search-scoped sub-task covers MiniLM only.
+- **Description**: Bundle all-MiniLM-L6-v2 CoreML model (.mlpackage) as SPM resource for 384-dim embedding generation. ~50MB bundled model. DistilBERT model bundling is defined by AI spec Section 5.4 and tracked under AI classification tasks. AI task IOS-A-01b has broader scope (DistilBERT + MiniLM); this Search-scoped sub-task covers MiniLM only.
 - **Deliverables**:
   - [ ] Convert all-MiniLM-L6-v2 to CoreML format (.mlpackage)
   - [ ] Add to SPM package resources
@@ -71,7 +71,7 @@ updated: 2026-02-10
 
 ---
 
-### IOS-A-16: GenerateEmbeddingUseCase
+### IOS-S-02: GenerateEmbeddingUseCase
 
 - **Status**: `todo`
 - **Spec ref**: FR-SEARCH-07
@@ -92,7 +92,7 @@ updated: 2026-02-10
 
 ---
 
-### IOS-A-15: SearchIndexManager + VectorSearchEngine
+### IOS-S-03: SearchIndexManager + VectorSearchEngine
 
 - **Status**: `todo`
 - **Spec ref**: FR-SEARCH-08, FR-SEARCH-07
@@ -105,17 +105,15 @@ updated: 2026-02-10
     - For each, fetch corresponding Email by emailId, set accountId from email.accountId
     - Batch save (100 entries per save)
     - Wire into app startup with UserDefaults guard (`searchIndexAccountIdBackfillComplete`)
-  - [ ] Update `AIProcessingQueue.generateEmbeddings()` to set `accountId` on new SearchIndex entries
-  - [ ] `SearchIndexManager.swift` — actor managing incremental indexing
-    - On new email sync: insert into FTS5 + generate embedding + upsert SearchIndex
-    - On email delete: `removeEmail(emailId:)` — delete FTS5 row + delete SearchIndex entry
-    - On account delete: `removeAllForAccount(accountId:)` — bulk-delete FTS5 rows + SearchIndex entries by accountId
+  - [ ] `SearchIndexManager.swift` — actor managing incremental indexing (**single owner** of all FTS5 + SearchIndex mutations)
+    - `indexEmail(email:)` — insert into FTS5 + generate embedding + upsert SearchIndex (including accountId)
+    - `removeEmail(emailId:)` — delete FTS5 row + delete SearchIndex entry
+    - `removeAllForAccount(accountId:)` — bulk-delete FTS5 rows + SearchIndex entries by accountId
     - On sync reconciliation: clean up orphaned FTS5/SearchIndex entries for server-missing emails
     - Auto-detect unindexed emails and index progressively in background
     - Full reindex capability (for Settings > "Rebuild Search Index")
-    - Wire into `SyncEmailsUseCase` sync pipeline
-    - Wire into `AIProcessingQueue` batch processing
-  - [ ] Refactor `AIProcessingQueue.generateEmbeddings()` to delegate to `SearchIndexManager.indexEmail()` instead of directly creating/updating SearchIndex entries
+  - [ ] Refactor `AIProcessingQueue.generateEmbeddings()` to delegate to `SearchIndexManager.indexEmail()` — removes all direct SearchIndex manipulation from AIProcessingQueue (single entry point for indexing)
+  - [ ] Wire `SearchIndexManager.indexEmail()` into `SyncEmailsUseCase` sync pipeline (called by AIProcessingQueue via delegation, not wired separately)
   - [ ] Wire `removeEmail()` into `EmailRepositoryImpl.deleteEmail()`
   - [ ] Wire `removeAllForAccount()` into `AccountRepositoryImpl.removeAccount()`
   - [ ] `VectorSearchEngine.swift` — in-memory cosine similarity
@@ -127,7 +125,7 @@ updated: 2026-02-10
 
 ---
 
-### IOS-A-17: SearchEmailsUseCase + QueryParser + RRFMerger
+### IOS-S-04: SearchEmailsUseCase + QueryParser + RRFMerger
 
 - **Status**: `todo`
 - **Spec ref**: FR-SEARCH-04, FR-SEARCH-05, FR-SEARCH-03
@@ -164,7 +162,7 @@ updated: 2026-02-10
 
 ---
 
-### IOS-A-18: Search UI
+### IOS-S-05: Search UI
 
 - **Status**: `todo`
 - **Spec ref**: FR-SEARCH-01, FR-SEARCH-02, FR-SEARCH-03, FR-SEARCH-09
