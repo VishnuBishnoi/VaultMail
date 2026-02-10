@@ -135,9 +135,10 @@ struct MessageBubbleView: View {
                     .padding(.horizontal, 12)
             }
 
-            // Body content
+            // Body content — minimal horizontal padding so HTML renders
+            // closer to edge-to-edge within the bubble card.
             bodyContent
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 4)
 
             // Quoted text expander
             if hasQuotedText && !showQuotedText {
