@@ -212,10 +212,14 @@ public final class AIRepositoryImpl: AIRepositoryProtocol {
 
     /// Generate a deterministic hash-based embedding from text.
     ///
-    /// Tokenizes the text into lowercased words, hashes each word, and
-    /// accumulates into a fixed-dimension vector. The result is L2-normalized.
-    /// This provides basic bag-of-words similarity until CoreML MiniLM
-    /// is available for proper semantic embeddings.
+    /// Uses FNV-1a (64-bit) with fixed seeds for stable feature hashing.
+    /// Unlike Swift `Hasher` (which is process-seeded and non-deterministic
+    /// across launches), FNV-1a always produces the same output for the same
+    /// input, so persisted `SearchIndex.embedding` values remain compatible
+    /// with query-time embeddings in later processes.
+    ///
+    /// Tokenizes text into lowercased words, hashes each word into a bucket
+    /// (dimension index) and a sign, then L2-normalizes the result.
     ///
     /// Spec ref: FR-AI-05 (fallback path)
     static func hashEmbedding(text: String) -> [Float] {
@@ -232,20 +236,15 @@ public final class AIRepositoryImpl: AIRepositoryProtocol {
         }
 
         for word in words {
-            // Use two independent hashes per word for better distribution
-            var hasher1 = Hasher()
-            hasher1.combine(word)
-            hasher1.combine(0)
-            let h1 = abs(hasher1.finalize()) % dim
+            // Hash 1 (seed=0): determines the bucket (dimension index)
+            let h1 = fnv1a(word, seed: 0)
+            let bucket = Int(h1 % UInt64(dim))
 
-            var hasher2 = Hasher()
-            hasher2.combine(word)
-            hasher2.combine(1)
-            let h2 = hasher2.finalize()
-
-            // +1 or -1 based on second hash (random sign trick)
+            // Hash 2 (seed=1): determines the sign (+1 or -1)
+            let h2 = fnv1a(word, seed: 1)
             let sign: Float = h2 % 2 == 0 ? 1.0 : -1.0
-            vector[h1] += sign
+
+            vector[bucket] += sign
         }
 
         // L2-normalize
@@ -257,5 +256,28 @@ public final class AIRepositoryImpl: AIRepositoryProtocol {
         }
 
         return vector
+    }
+
+    // MARK: - FNV-1a (stable hash)
+
+    /// FNV-1a 64-bit hash with a configurable seed offset.
+    ///
+    /// Deterministic across processes and app launches (unlike Swift `Hasher`).
+    /// The seed is mixed into the FNV offset basis so two calls with different
+    /// seeds produce independent hash values for the same input.
+    private static func fnv1a(_ string: String, seed: UInt64) -> UInt64 {
+        // FNV-1a 64-bit parameters
+        let fnvOffsetBasis: UInt64 = 14_695_981_039_346_656_037
+        let fnvPrime: UInt64 = 1_099_511_628_211
+
+        // Mix seed into offset basis for independent hash families
+        var hash = fnvOffsetBasis &+ seed &* fnvPrime
+
+        for byte in string.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* fnvPrime
+        }
+
+        return hash
     }
 }
