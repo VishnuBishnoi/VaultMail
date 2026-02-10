@@ -73,6 +73,14 @@ last-validated: null
 - **Then**: Results **MUST** show only emails from john@example.com that have attachments (AND logic)
 - **When**: The user types "budget" in the search bar with filters active
 - **Then**: Results **MUST** match "budget" AND sender=john AND hasAttachment=true
+- **When**: The user taps the "Date" filter chip and selects "Last 7 days"
+- **Then**: Results **MUST** show only emails from the last 7 days
+- **When**: The user taps the "Folder" filter chip and selects "Sent"
+- **Then**: Results **MUST** show only emails in the Sent folder
+- **When**: The user taps the "Category" filter chip and selects "Promotions"
+- **Then**: Results **MUST** show only emails with `AICategory.promotions`
+- **When**: The user taps the "Unread" filter chip
+- **Then**: Results **MUST** show only unread emails
 - **Priority**: High
 
 ---
@@ -84,6 +92,11 @@ last-validated: null
 - **Then**: Results **MUST** only include emails from the Inbox folder
 - **When**: The user switches scope to "All Mail"
 - **Then**: Results **MUST** include emails from all folders
+- **Given**: An email exists in both Inbox and Archive (multi-folder via EmailFolder join)
+- **When**: The user searches with scope "Inbox"
+- **Then**: The email **MUST** appear in results
+- **When**: The user switches scope to "Drafts"
+- **Then**: The email **MUST NOT** appear in results
 - **Priority**: Medium
 
 ---
@@ -102,6 +115,12 @@ last-validated: null
 - **Then**:
   - Sender filter **MUST** be set to "sarah"
   - "budget report" **MUST** be used as the free-text search query
+- **When**: The user types "unread promotions from john"
+- **Then**:
+  - Sender filter **MUST** be set to "john"
+  - Category filter **MUST** be set to "promotions"
+  - Read status filter **MUST** be set to unread (isRead = false)
+  - Remaining text for FTS5/semantic search **MUST** be empty (all tokens consumed by filters)
 - **Priority**: Medium
 
 ---
@@ -111,9 +130,11 @@ last-validated: null
 - **Given**: 1000 synced and indexed emails, including one about "quarterly budget review"
 - **When**: The user searches for "financial planning meeting"
 - **Then**:
-  - The email about "quarterly budget review" **SHOULD** appear in the top-20 results (semantic match). If the embedding model produces low-quality results, keyword matches alone **MUST** still be returned.
+  - Semantic search **SHOULD** return results that are conceptually related but not keyword-matched (e.g., "quarterly budget review" for query "financial planning meeting"). This is a **smoke test** — pass criteria: at least one non-keyword-matched result appears when embeddings are available.
+  - If no semantic results appear, the system **MUST** still return keyword-only results without error
   - Results **MUST** be ranked by relevance (RRF fusion score)
   - When embeddings are available, results **SHOULD** include both keyword and semantic matches
+  - For production quality validation, use Recall@20 ≥ 0.3 on a labeled test corpus (defined during implementation)
 - **Priority**: High
 
 ---

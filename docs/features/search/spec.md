@@ -124,6 +124,7 @@ SwiftData wraps Core Data which wraps SQLite, but it does NOT expose:
   - **Current Folder**: Search within the currently selected folder
 - Default scope **MUST** be "All Mail".
 - Scope selection **MUST** persist within the search session.
+- "Current Folder" filtering **MUST** be applied outside FTS5 as a SwiftData predicate joining FTS5 result email IDs against `EmailFolder.folder.id`. This avoids storing mutable folder associations in the FTS5 index and correctly handles multi-folder emails (Gmail labels).
 
 ### FR-SEARCH-04: Natural Language Query Parsing
 
@@ -182,7 +183,6 @@ v       v                        |
       body,
       sender_name,
       sender_email,
-      folder_name UNINDEXED,
       tokenize='unicode61 remove_diacritics 2'
   );
   ```
@@ -203,6 +203,7 @@ v       v                        |
 ### FR-SEARCH-08: Search Index Management
 
 - The client **MUST** build the search index incrementally during email sync (not as a separate pass).
+- `SearchIndexManager` is the **single owner** of all search index mutations (FTS5 inserts/deletes and SearchIndex entity upserts). `AIProcessingQueue.generateEmbeddings()` **MUST** delegate to `SearchIndexManager` rather than directly manipulating SearchIndex entries, to prevent duplicate writes and race conditions.
 - When `SyncEmailsUseCase` inserts new emails, it **MUST** also:
   1. Insert into FTS5 table (subject + body + sender)
   2. Generate embedding via `GenerateEmbeddingUseCase` and store in `SearchIndex.embedding`
@@ -293,7 +294,6 @@ CREATE VIRTUAL TABLE email_fts USING fts5(
     body,
     sender_name,
     sender_email,
-    folder_name UNINDEXED,
     tokenize='unicode61 remove_diacritics 2'
 );
 ```
@@ -326,12 +326,19 @@ enum SearchScope: Sendable {
 
 ```swift
 struct SearchResult: Identifiable, Sendable {
-    let id: String                      // Thread ID
-    let thread: Thread
-    let matchedEmail: Email
-    let score: Double                   // RRF fusion score
+    let id: String                      // Thread ID (used as Identifiable id)
+    let threadId: String
+    let emailId: String
+    let subject: String
+    let senderName: String
+    let senderEmail: String
+    let date: Date
     let snippet: String                 // Body snippet with match context
+    let highlightRanges: [Range<String.Index>]  // For keyword highlighting
+    let hasAttachment: Bool
+    let score: Double                   // RRF fusion score
     let matchSource: MatchSource
+    let accountId: String
 }
 
 enum MatchSource: Sendable {
@@ -340,6 +347,8 @@ enum MatchSource: Sendable {
     case both
 }
 ```
+
+> **Concurrency note**: `SearchResult` is a lightweight value type carrying only display data. It does **NOT** embed `@Model` objects (`Thread`, `Email`) which are `ModelContext`-bound and not safely `Sendable` across concurrency boundaries. The view layer fetches full `@Model` objects on `@MainActor` via the `threadId`/`emailId` when navigation is needed.
 
 ---
 

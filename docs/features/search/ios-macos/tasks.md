@@ -11,7 +11,7 @@ updated: 2026-02-10
 
 > Each task references its plan ID, spec section, and acceptance criteria. Status values: `todo`, `in-progress`, `done`, `blocked`.
 
-> **This is the only unlocked feature.** All other features (email sync, composer, AI phases 1–3+5, polish, macOS adaptation) are complete and locked. Search is the remaining major work item.
+> **This is the only unlocked feature document.** All other feature documents (email sync, composer, AI phases 1–3+5, polish, macOS adaptation) are complete and locked. Search is the remaining major work item. AI Phase 4 tasks (IOS-A-14..17) and IOS-A-01b are forward-references to this document — see cross-reference note below.
 
 ---
 
@@ -23,6 +23,8 @@ updated: 2026-02-10
 - `SearchPlaceholder.swift` shows "Search coming soon" placeholder — will be replaced by `SearchView`
 - `AIProcessingQueue` has `generateEmbeddings()` hook — ready to wire
 - `ThreadListView` has search tab wired to `SearchPlaceholder` — needs rewiring to `SearchView`
+
+> **Task ID cross-reference**: IOS-A-14 through IOS-A-17 are declared in AI Features tasks (Phase 4) as forward-references to this Search plan. The definitions below are the canonical, detailed specifications for these tasks. IOS-A-18 (Search UI) is Search-only. See AI tasks.md line 337.
 
 ---
 
@@ -36,7 +38,7 @@ updated: 2026-02-10
   - [ ] `FTS5Manager.swift` — actor wrapping raw SQLite C API
     - Open/close `search.sqlite` database
     - Create FTS5 virtual table with unicode61 tokenizer (no porter stemmer)
-    - Insert email content (email_id, account_id, subject, body, sender_name, sender_email, folder_name)
+    - Insert email content (email_id, account_id, subject, body, sender_name, sender_email)
     - Delete by email_id
     - Search with prefix matching (`query*`), BM25 ranking
     - Highlight matches via `highlight()` auxiliary function
@@ -55,12 +57,12 @@ updated: 2026-02-10
 
 ---
 
-### IOS-A-01b: CoreML Model Bundling (MiniLM)
+### IOS-A-01b: CoreML Model Bundling (MiniLM — Search Scope)
 
 - **Status**: `todo`
 - **Spec ref**: FR-SEARCH-07, Search spec Section 3.2
 - **Validation ref**: AC-S-06
-- **Description**: Bundle all-MiniLM-L6-v2 CoreML model (.mlpackage) as SPM resource for 384-dim embedding generation. ~50MB bundled model. DistilBERT model bundling is defined by AI spec Section 5.4 and tracked under AI classification tasks.
+- **Description**: Bundle all-MiniLM-L6-v2 CoreML model (.mlpackage) as SPM resource for 384-dim embedding generation. ~50MB bundled model. DistilBERT model bundling is defined by AI spec Section 5.4 and tracked under AI classification tasks. AI tasks IOS-A-01b has broader scope (DistilBERT + MiniLM); this Search-scoped sub-task covers MiniLM only.
 - **Deliverables**:
   - [ ] Convert all-MiniLM-L6-v2 to CoreML format (.mlpackage)
   - [ ] Add to SPM package resources
@@ -113,6 +115,7 @@ updated: 2026-02-10
     - Full reindex capability (for Settings > "Rebuild Search Index")
     - Wire into `SyncEmailsUseCase` sync pipeline
     - Wire into `AIProcessingQueue` batch processing
+  - [ ] Refactor `AIProcessingQueue.generateEmbeddings()` to delegate to `SearchIndexManager.indexEmail()` instead of directly creating/updating SearchIndex entries
   - [ ] Wire `removeEmail()` into `EmailRepositoryImpl.deleteEmail()`
   - [ ] Wire `removeAllForAccount()` into `AccountRepositoryImpl.removeAccount()`
   - [ ] `VectorSearchEngine.swift` — in-memory cosine similarity
@@ -153,6 +156,7 @@ updated: 2026-02-10
     - Apply structured filters via SwiftData predicate
     - Group results by thread
     - Return SearchResult array sorted by score
+    - Apply "Current Folder" scope via SwiftData EmailFolder join (not FTS5 column) — handles multi-folder emails correctly
     - Graceful fallback: keyword-only if embeddings unavailable
   - [ ] Update `SearchRepositoryProtocol` — expand for hybrid search
   - [ ] `SearchRepositoryImpl.swift` — implement expanded protocol

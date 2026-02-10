@@ -17,6 +17,8 @@ target-milestone: V1.0
 
 This plan covers the full search feature: FTS5 full-text index, semantic embedding search, hybrid RRF fusion, natural language query parsing, and the search UI. The implementation spans Data, Domain, and Presentation layers.
 
+**Task ownership**: IOS-A-14 through IOS-A-17 were forward-declared in AI Features tasks (Phase 4) and are fully specified here. This plan is the canonical source for these task IDs.
+
 **Backend tasks** (IOS-A-01b, IOS-A-14–17) build the search infrastructure. **UI task** (IOS-A-18) builds the search interface. All tasks are tracked in this plan and the corresponding tasks file.
 
 ---
@@ -74,7 +76,7 @@ Refer to Foundation plan Section 2. Search is fully local (no server-side IMAP S
 | `SearchPlaceholder.swift` | Replace with `SearchView` |
 | `ContentView.swift` / tab navigation | Wire `SearchView` into Search tab |
 | `SyncEmailsUseCase.swift` | Hook `SearchIndexManager` for incremental indexing |
-| `AIProcessingQueue.swift` | Wire embedding generation during batch processing; set `accountId` on new SearchIndex entries |
+| `AIProcessingQueue.swift` | Refactor `generateEmbeddings()` to delegate to `SearchIndexManager.indexEmail()`; remove direct SearchIndex manipulation |
 | `EmailRepositoryImpl.swift` | Hook `SearchIndexManager.removeEmail()` in `deleteEmail()` |
 | `AccountRepositoryImpl.swift` | Hook `SearchIndexManager.removeAllForAccount()` in `removeAccount()` |
 
