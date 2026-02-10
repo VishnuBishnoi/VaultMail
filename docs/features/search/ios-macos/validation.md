@@ -25,7 +25,7 @@ last-validated: null
 | FR-SEARCH-04 | NL query parsing | MUST | AC-S-05 | iOS | — |
 | FR-SEARCH-05 | Hybrid search architecture | MUST | AC-S-06 | iOS | — |
 | FR-SEARCH-06 | FTS5 full-text index | MUST | AC-S-07 | iOS | — |
-| FR-SEARCH-07 | Semantic embedding search | MUST | AC-S-08 | iOS | — |
+| FR-SEARCH-07 | Semantic embedding search | MUST | AC-S-06, AC-S-08 | iOS | — |
 | FR-SEARCH-08 | Search index management | MUST | AC-S-09 | iOS | — |
 | FR-SEARCH-09 | Recent searches | MUST | AC-S-10 | iOS | — |
 | NFR-SEARCH-01 | Search performance | MUST | AC-S-11 | iOS | — |

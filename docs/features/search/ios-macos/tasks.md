@@ -113,7 +113,7 @@ updated: 2026-02-10
     - Auto-detect unindexed emails and index progressively in background
     - Full reindex capability (for Settings > "Rebuild Search Index")
   - [ ] Refactor `AIProcessingQueue.generateEmbeddings()` to delegate to `SearchIndexManager.indexEmail()` — removes all direct SearchIndex manipulation from AIProcessingQueue (single entry point for indexing)
-  - [ ] Wire `SearchIndexManager.indexEmail()` into `SyncEmailsUseCase` sync pipeline (called by AIProcessingQueue via delegation, not wired separately)
+  - [ ] Wire into sync pipeline: `SyncEmailsUseCase` → `AIProcessingQueue` → `SearchIndexManager.indexEmail()` (single delegation chain; SyncEmailsUseCase does NOT call SearchIndexManager directly)
   - [ ] Wire `removeEmail()` into `EmailRepositoryImpl.deleteEmail()`
   - [ ] Wire `removeAllForAccount()` into `AccountRepositoryImpl.removeAccount()`
   - [ ] `VectorSearchEngine.swift` — in-memory cosine similarity

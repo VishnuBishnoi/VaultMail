@@ -19,7 +19,7 @@ This plan covers the full search feature: FTS5 full-text index, semantic embeddi
 
 **Task IDs**: Search uses its own namespace (IOS-S-00..05) to avoid collision with locked AI docs. AI Phase 4 forward-references (IOS-A-14..17) are superseded by the IOS-S-xx tasks defined here.
 
-**Backend tasks** (IOS-S-00, IOS-S-01–17) build the search infrastructure. **UI task** (IOS-S-05) builds the search interface. All tasks are tracked in this plan and the corresponding tasks file.
+**Backend tasks** (IOS-S-00, IOS-S-01–04) build the search infrastructure. **UI task** (IOS-S-05) builds the search interface. All tasks are tracked in this plan and the corresponding tasks file.
 
 ---
 
@@ -105,7 +105,7 @@ Refer to Foundation plan Section 2. Search is fully local (no server-side IMAP S
 |------|-------------|-------------|
 | IOS-S-03a | `SearchIndexManager` — incremental FTS5 + embedding indexing during sync | IOS-S-01, IOS-S-02 |
 | IOS-S-03b | `VectorSearchEngine` — load embeddings from SwiftData into memory, brute-force cosine similarity | IOS-S-02 |
-| IOS-S-03c | Wire `SearchIndexManager` into `SyncEmailsUseCase` and `AIProcessingQueue` | IOS-S-03a |
+| IOS-S-03c | Wire `SearchIndexManager` into `AIProcessingQueue` (single delegation path: sync → AIProcessingQueue → SearchIndexManager) | IOS-S-03a |
 | IOS-S-03d | Update `SearchIndex` model: add `accountId` field | None |
 | IOS-S-03e | Unit tests for index manager and vector search | IOS-S-03a, IOS-S-03b |
 
