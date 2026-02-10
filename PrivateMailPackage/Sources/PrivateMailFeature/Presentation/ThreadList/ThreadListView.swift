@@ -117,6 +117,7 @@ struct ThreadListView: View {
     @State private var isSearchActive = false
     @State private var searchText = ""
     @State private var searchResults: [SearchResult] = []
+    @State private var searchThreads: [PrivateMailFeature.Thread] = []
     @State private var searchViewState: SearchViewState = .idle
     @State private var searchFilters = SearchFilters()
     @State private var recentSearches: [String] = []
@@ -280,6 +281,7 @@ struct ThreadListView: View {
                 // Reset search state when dismissed
                 searchText = ""
                 searchResults = []
+                searchThreads = []
                 searchViewState = .idle
                 searchFilters = SearchFilters()
             } else {
@@ -352,7 +354,7 @@ struct ThreadListView: View {
                 searchText: $searchText,
                 viewState: searchViewState,
                 filters: $searchFilters,
-                results: searchResults,
+                threads: searchThreads,
                 recentSearches: recentSearches,
                 onSelectRecentSearch: { query in
                     searchText = query
@@ -1138,12 +1140,32 @@ struct ThreadListView: View {
         guard !Task.isCancelled else { return }
 
         searchResults = results
-        searchViewState = results.isEmpty ? .empty : .results
+
+        // Fetch full Thread objects from SwiftData for unified ThreadRowView display
+        let threadIds = results.map(\.threadId)
+        let fetchedThreads = fetchThreadsForSearch(ids: threadIds)
+        // Preserve search ranking order
+        let threadMap = Dictionary(uniqueKeysWithValues: fetchedThreads.map { ($0.id, $0) })
+        searchThreads = threadIds.compactMap { threadMap[$0] }
+
+        searchViewState = searchThreads.isEmpty ? .empty : .results
 
         // Save to recent searches
         if !trimmed.isEmpty {
             saveRecentSearch(trimmed)
         }
+    }
+
+    /// Fetch Thread objects from SwiftData matching the given IDs.
+    private func fetchThreadsForSearch(ids: [String]) -> [PrivateMailFeature.Thread] {
+        guard !ids.isEmpty else { return [] }
+        let idSet = Set(ids)
+        let descriptor = FetchDescriptor<PrivateMailFeature.Thread>(
+            predicate: #Predicate<PrivateMailFeature.Thread> { thread in
+                idSet.contains(thread.id)
+            }
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
     }
 
     /// Merges manually-applied filter chips with filters extracted from NL parsing.

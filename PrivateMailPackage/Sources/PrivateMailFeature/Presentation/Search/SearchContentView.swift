@@ -16,20 +16,20 @@ enum SearchViewState: Equatable {
 
 /// Inline search content overlay for the thread list (Apple Mail style).
 ///
-/// Contains a custom search bar TextField at the top, followed by filter chips,
-/// and the appropriate content (recent searches, results, loading, empty state).
+/// Contains a custom search bar TextField at the top, and displays search
+/// results using the same ThreadRowView as the inbox for a unified look.
 /// Replaces the thread list content when search is active — no navigation
 /// transition, the search bar appears in-place.
 ///
 /// MV pattern: receives all state as let properties and bindings.
-/// Business logic (search execution, filter merging) lives in the parent.
+/// Business logic (search execution, filter merging, Thread lookup) lives in parent.
 ///
 /// Spec ref: FR-SEARCH-01, FR-SEARCH-02, FR-SEARCH-09
 struct SearchContentView: View {
     @Binding var searchText: String
     let viewState: SearchViewState
     @Binding var filters: SearchFilters
-    let results: [SearchResult]
+    let threads: [PrivateMailFeature.Thread]
     let recentSearches: [String]
     let onSelectRecentSearch: (String) -> Void
     let onClearRecentSearches: () -> Void
@@ -130,13 +130,13 @@ struct SearchContentView: View {
         }
     }
 
-    // MARK: - Results List
+    // MARK: - Results List (uses same ThreadRowView as inbox)
 
     @ViewBuilder
     private var searchResultsList: some View {
-        List(results) { result in
-            NavigationLink(value: result.threadId) {
-                SearchResultRowView(result: result, query: searchText)
+        List(threads, id: \.id) { thread in
+            NavigationLink(value: thread.id) {
+                ThreadRowView(thread: thread)
             }
         }
         .listStyle(.plain)
