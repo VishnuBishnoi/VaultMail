@@ -63,9 +63,9 @@ public actor ModelManager {
         ModelInfo(
             id: "qwen3-1.7b-q4km",
             name: "Qwen3 1.7B Instruct",
-            fileName: "Qwen3-1.7B-Instruct-Q4_K_M.gguf",
-            downloadURL: URL(string: "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/main/qwen3-1.7b-q4_k_m.gguf")!,
-            size: 1_200_000_000,   // ~1.0 GB
+            fileName: "Qwen3-1.7B-Q4_K_M.gguf",
+            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf")!,
+            size: 1_110_000_000,   // ~1.11 GB
             sha256: "",            // TODO: Fill with actual checksum after first download verification
             license: "Apache 2.0",
             minRAMGB: 6
@@ -74,8 +74,8 @@ public actor ModelManager {
             id: "qwen3-0.6b-q4km",
             name: "Qwen3 0.6B",
             fileName: "Qwen3-0.6B-Q4_K_M.gguf",
-            downloadURL: URL(string: "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/qwen3-0.6b-q4_k_m.gguf")!,
-            size: 490_000_000,     // ~400 MB
+            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf")!,
+            size: 397_000_000,     // ~397 MB
             sha256: "",            // TODO: Fill with actual checksum after first download verification
             license: "Apache 2.0",
             minRAMGB: 4
