@@ -19,6 +19,7 @@ struct PrivateMailApp: App {
     let idleMonitor: IDLEMonitorUseCaseProtocol
     let backgroundSyncScheduler: BackgroundSyncScheduler
     let aiModelManager: ModelManager
+    let aiProcessingQueue: AIProcessingQueue
 
     init() {
         do {
@@ -93,6 +94,15 @@ struct PrivateMailApp: App {
         backgroundSyncScheduler.scheduleNextSync()
 
         aiModelManager = ModelManager()
+
+        // AI classification pipeline
+        let aiEngineResolver = AIEngineResolver(modelManager: aiModelManager)
+        let categorizeUseCase = CategorizeEmailUseCase(engineResolver: aiEngineResolver)
+        let detectSpamUseCase = DetectSpamUseCase(engineResolver: aiEngineResolver)
+        aiProcessingQueue = AIProcessingQueue(
+            categorize: categorizeUseCase,
+            detectSpam: detectSpamUseCase
+        )
     }
 
     var body: some Scene {
@@ -109,7 +119,8 @@ struct PrivateMailApp: App {
                 queryContacts: queryContacts,
                 idleMonitor: idleMonitor,
                 appLockManager: appLockManager,
-                modelManager: aiModelManager
+                modelManager: aiModelManager,
+                aiProcessingQueue: aiProcessingQueue
             )
             .environment(settingsStore)
         }

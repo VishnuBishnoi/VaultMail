@@ -32,6 +32,7 @@ struct ThreadListView: View {
     let queryContacts: QueryContactsUseCaseProtocol
     let idleMonitor: IDLEMonitorUseCaseProtocol?
     var modelManager: ModelManager = ModelManager()
+    var aiProcessingQueue: AIProcessingQueue?
 
     @Environment(UndoSendManager.self) private var undoSendManager
 
@@ -345,6 +346,7 @@ struct ThreadListView: View {
                 }
             }
             await reloadThreads()
+            runAIClassification()
         }
         .navigationDestination(for: String.self) { threadId in
             EmailDetailView(
@@ -654,6 +656,9 @@ struct ThreadListView: View {
                     await loadThreadsAndCounts()
                     NSLog("[UI] Threads reloaded, count: \(threads.count)")
 
+                    // Phase 2.5: Run AI classification on synced emails
+                    runAIClassification()
+
                     // Phase 3: Start IMAP IDLE for real-time inbox updates (FR-SYNC-03)
                     startIDLEMonitor()
                 } catch {
@@ -697,6 +702,7 @@ struct ThreadListView: View {
                         if let folderId = selectedFolder?.id {
                             try? await syncEmails.syncFolder(accountId: accountId, folderId: folderId)
                             await loadThreadsAndCounts()
+                            runAIClassification()
                         }
                         retryDelay = .seconds(2) // reset on success
                     case .disconnected:
@@ -989,6 +995,20 @@ struct ThreadListView: View {
         case .discarded, .cancelled:
             break
         }
+    }
+
+    // MARK: - AI Classification
+
+    /// Enqueue uncategorized emails from currently loaded threads for AI processing.
+    ///
+    /// Called after sync completes to trigger background AI classification.
+    /// The queue itself filters to uncategorized-only, so we can pass all emails.
+    private func runAIClassification() {
+        guard let queue = aiProcessingQueue else { return }
+        let allEmails = threads.flatMap(\.emails)
+        guard !allEmails.isEmpty else { return }
+        NSLog("[AI] Enqueuing \(allEmails.count) emails for AI classification")
+        queue.enqueue(emails: allEmails)
     }
 
     // MARK: - Helpers

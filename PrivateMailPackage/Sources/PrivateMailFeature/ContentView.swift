@@ -37,6 +37,7 @@ public struct ContentView: View {
     let idleMonitor: IDLEMonitorUseCaseProtocol?
     let appLockManager: AppLockManager
     let modelManager: ModelManager
+    let aiProcessingQueue: AIProcessingQueue
 
     @State private var accounts: [Account] = []
     @State private var hasLoaded = false
@@ -54,7 +55,11 @@ public struct ContentView: View {
         queryContacts: QueryContactsUseCaseProtocol,
         idleMonitor: IDLEMonitorUseCaseProtocol? = nil,
         appLockManager: AppLockManager,
-        modelManager: ModelManager = ModelManager()
+        modelManager: ModelManager = ModelManager(),
+        aiProcessingQueue: AIProcessingQueue = AIProcessingQueue(
+            categorize: CategorizeEmailUseCase(engineResolver: AIEngineResolver(modelManager: ModelManager())),
+            detectSpam: DetectSpamUseCase(engineResolver: AIEngineResolver(modelManager: ModelManager()))
+        )
     ) {
         self.manageAccounts = manageAccounts
         self.fetchThreads = fetchThreads
@@ -68,6 +73,7 @@ public struct ContentView: View {
         self.idleMonitor = idleMonitor
         self.appLockManager = appLockManager
         self.modelManager = modelManager
+        self.aiProcessingQueue = aiProcessingQueue
     }
 
     public var body: some View {
@@ -128,7 +134,8 @@ public struct ContentView: View {
             composeEmail: composeEmail,
             queryContacts: queryContacts,
             idleMonitor: idleMonitor,
-            modelManager: modelManager
+            modelManager: modelManager,
+            aiProcessingQueue: aiProcessingQueue
         )
         .environment(undoSendManager)
         .preferredColorScheme(settings.colorScheme)
