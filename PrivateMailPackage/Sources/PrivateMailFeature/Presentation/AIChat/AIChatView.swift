@@ -15,17 +15,15 @@ struct AIChatView: View {
 
     // MARK: - State
 
-    @State private var messages: [ChatMessage] = []
+    @State private var chatModel = ChatModel()
     @State private var inputText = ""
-    @State private var isGenerating = false
     @State private var generationTask: Task<Void, Never>?
-    @State private var engineAvailable = true
 
     // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
-            if messages.isEmpty {
+            if chatModel.messages.isEmpty {
                 emptyState
             } else {
                 messageList
@@ -66,7 +64,7 @@ struct AIChatView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
 
-            if !engineAvailable {
+            if !chatModel.engineAvailable {
                 Label(
                     "Download an AI model in Settings to get started.",
                     systemImage: "exclamationmark.triangle"
@@ -89,7 +87,7 @@ struct AIChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(messages) { message in
+                    ForEach(chatModel.messages) { message in
                         ChatBubble(message: message)
                             .id(message.id)
                     }
@@ -97,18 +95,19 @@ struct AIChatView: View {
                 .padding(.vertical, 12)
                 .padding(.horizontal, 16)
             }
-            .onChange(of: messages.count) {
-                if let last = messages.last {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
-                }
+            .onChange(of: chatModel.messages.count) {
+                scrollToBottom(proxy: proxy)
             }
-            // Also scroll when streaming updates the last message content
-            .onChange(of: messages.last?.text) {
-                if let last = messages.last {
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
+            .onChange(of: chatModel.lastMessageText) {
+                scrollToBottom(proxy: proxy)
+            }
+        }
+    }
+
+    private func scrollToBottom(proxy: ScrollViewProxy) {
+        if let last = chatModel.messages.last {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(last.id, anchor: .bottom)
             }
         }
     }
@@ -123,9 +122,9 @@ struct AIChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 20))
-                .disabled(isGenerating)
+                .disabled(chatModel.isGenerating)
 
-            if isGenerating {
+            if chatModel.isGenerating {
                 Button {
                     stopGeneration()
                 } label: {
@@ -153,14 +152,15 @@ struct AIChatView: View {
     // MARK: - Computed
 
     private var canSend: Bool {
-        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isGenerating
+        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !chatModel.isGenerating
     }
 
     // MARK: - Actions
 
     private func checkEngineAvailability() async {
         let engine = await engineResolver.resolveGenerativeEngine()
-        engineAvailable = await engine.isAvailable()
+        let available = await engine.isAvailable()
+        chatModel.engineAvailable = available
     }
 
     private func sendMessage() {
@@ -168,32 +168,33 @@ struct AIChatView: View {
         guard !text.isEmpty else { return }
 
         // Add user message
-        let userMessage = ChatMessage(role: .user, text: text)
-        messages.append(userMessage)
+        chatModel.addMessage(role: .user, text: text)
         inputText = ""
 
-        // Start generating response
-        isGenerating = true
-        let assistantMessage = ChatMessage(role: .assistant, text: "")
-        messages.append(assistantMessage)
-        let assistantIndex = messages.count - 1
+        // Add placeholder assistant message
+        let assistantId = chatModel.addMessage(role: .assistant, text: "")
+        chatModel.isGenerating = true
 
-        generationTask = Task { @MainActor in
+        generationTask = Task {
             let engine = await engineResolver.resolveGenerativeEngine()
 
             let available = await engine.isAvailable()
             guard available else {
-                messages[assistantIndex].text = "AI model not available. Please download a model in Settings → AI Features."
-                engineAvailable = false
-                isGenerating = false
+                await MainActor.run {
+                    chatModel.updateMessage(id: assistantId, text: "AI model not available. Please download a model in Settings → AI Features.")
+                    chatModel.engineAvailable = false
+                    chatModel.isGenerating = false
+                }
                 return
             }
 
             // Build conversation history for the prompt.
             // Drop the last 2 messages (placeholder assistant + new user) since
             // PromptTemplates.chat() appends the userMessage itself.
-            let history: [(role: String, content: String)] = messages.dropLast(2).map { msg in
-                (role: msg.role == .user ? "User" : "Assistant", content: msg.text)
+            let history: [(role: String, content: String)] = await MainActor.run {
+                chatModel.messages.dropLast(2).map { msg in
+                    (role: msg.role == .user ? "User" : "Assistant", content: msg.text)
+                }
             }
             let prompt = PromptTemplates.chat(
                 conversationHistory: history,
@@ -203,28 +204,70 @@ struct AIChatView: View {
             let stream = await engine.generate(prompt: prompt, maxTokens: 1024)
             for await token in stream {
                 guard !Task.isCancelled else { break }
-                messages[assistantIndex].text += token
+                await MainActor.run {
+                    chatModel.appendToMessage(id: assistantId, token: token)
+                }
             }
 
             // If empty response (model returned nothing), show fallback
-            if messages[assistantIndex].text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                messages[assistantIndex].text = "I couldn't generate a response. Please try again."
+            await MainActor.run {
+                let currentText = chatModel.messageText(for: assistantId)
+                if currentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    chatModel.updateMessage(id: assistantId, text: "I couldn't generate a response. Please try again.")
+                }
+                chatModel.isGenerating = false
             }
-
-            isGenerating = false
         }
     }
 
     private func stopGeneration() {
         generationTask?.cancel()
         generationTask = nil
-        isGenerating = false
+        chatModel.isGenerating = false
 
         // If the assistant message is empty after cancellation, add a note
-        if let last = messages.last, last.role == .assistant,
+        if let last = chatModel.messages.last, last.role == .assistant,
            last.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            messages[messages.count - 1].text = "(Generation stopped)"
+            chatModel.updateMessage(id: last.id, text: "(Generation stopped)")
         }
+    }
+}
+
+// MARK: - Chat Model (@Observable)
+
+/// Observable model that holds chat state. Using @Observable ensures
+/// SwiftUI properly tracks all mutations including array element updates.
+@Observable
+@MainActor
+final class ChatModel {
+    var messages: [ChatMessage] = []
+    var isGenerating = false
+    var engineAvailable = true
+
+    /// Text of the last message — used by `.onChange` to detect streaming updates.
+    var lastMessageText: String {
+        messages.last?.text ?? ""
+    }
+
+    @discardableResult
+    func addMessage(role: ChatMessage.Role, text: String) -> UUID {
+        let message = ChatMessage(role: role, text: text)
+        messages.append(message)
+        return message.id
+    }
+
+    func updateMessage(id: UUID, text: String) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].text = text
+    }
+
+    func appendToMessage(id: UUID, token: String) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].text += token
+    }
+
+    func messageText(for id: UUID) -> String {
+        messages.first(where: { $0.id == id })?.text ?? ""
     }
 }
 
@@ -263,7 +306,7 @@ private struct ChatBubble: View {
                 if isEmptyAssistant {
                     // Typing indicator while waiting for tokens
                     HStack(spacing: 4) {
-                        ForEach(0..<3, id: \.self) { index in
+                        ForEach(0..<3, id: \.self) { _ in
                             Circle()
                                 .fill(Color.secondary.opacity(0.5))
                                 .frame(width: 6, height: 6)
