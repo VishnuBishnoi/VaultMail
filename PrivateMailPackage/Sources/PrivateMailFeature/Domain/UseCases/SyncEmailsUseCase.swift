@@ -472,13 +472,18 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
                 )
 
                 // Map to Email model
-                let email = mapToEmail(
+                let mappedEmail = mapToEmail(
                     header: header,
                     body: body,
                     accountId: account.id,
                     threadId: threadId
                 )
-                try await emailRepository.saveEmail(email)
+                // Use the managed object returned by saveEmail (may be an
+                // existing record when the email was already synced via
+                // another folder). Using the unmanaged local object would
+                // cause "Illegal attempt to relate PersistentIdentifier…
+                // to a model in another store" when setting email.thread.
+                let email = try await emailRepository.saveEmail(mappedEmail)
 
                 // Create EmailFolder join
                 let ef = EmailFolder(imapUID: Int(header.uid))
@@ -504,6 +509,9 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
                 mutableLookup[email.messageId] = email
                 allNewEmails.append(email)
             }
+
+            // Flush all inserts for this batch in a single save
+            try await emailRepository.flushChanges()
         }
 
         // Update thread aggregates for all affected threads
@@ -515,6 +523,9 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
                 emailLookup: mutableLookup
             )
         }
+
+        // Flush thread inserts/updates in a single save
+        try await emailRepository.flushChanges()
 
         // Update folder metadata
         let allFolderEmails = try await emailRepository.getEmails(folderId: folder.id)
