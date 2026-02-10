@@ -217,11 +217,10 @@ struct ThreadListView: View {
                     )
                 }
             }
-            .navigationTitle(navigationTitle)
+            .navigationTitle(isSearchActive ? "" : navigationTitle)
             #if os(iOS)
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(isSearchActive ? .inline : .large)
             #endif
-            .searchable(text: $searchText, isPresented: $isSearchActive, prompt: "Search emails")
             .toolbar {
                 if isMultiSelectMode {
                     ToolbarItem(placement: .cancellationAction) {
@@ -350,8 +349,8 @@ struct ThreadListView: View {
     private var contentView: some View {
         if isSearchActive {
             SearchContentView(
+                searchText: $searchText,
                 viewState: searchViewState,
-                searchText: searchText,
                 filters: $searchFilters,
                 results: searchResults,
                 recentSearches: recentSearches,
@@ -361,6 +360,9 @@ struct ThreadListView: View {
                 onClearRecentSearches: {
                     recentSearches = []
                     UserDefaults.standard.removeObject(forKey: recentSearchesKey)
+                },
+                onDismiss: {
+                    isSearchActive = false
                 }
             )
         } else {
