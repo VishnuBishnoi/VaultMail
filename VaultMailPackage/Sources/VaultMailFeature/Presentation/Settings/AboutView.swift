@@ -66,8 +66,7 @@ struct PrivacyPolicyView: View {
                     .font(.body)
 
                 // Full privacy policy URL (Constitution LG-02)
-                // TODO: Replace with actual hosted privacy policy URL before App Store submission.
-                if let url = URL(string: "https://vaultmail.app/privacy") {
+                if let url = URL(string: "https://appripe.com/vaultmail/privacy.html") {
                     Link("View Full Privacy Policy", destination: url)
                         .font(.callout)
                 }
