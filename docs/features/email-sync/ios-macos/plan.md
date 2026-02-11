@@ -2,12 +2,12 @@
 title: "Email Sync — iOS/macOS Implementation Plan"
 platform: iOS, macOS
 spec-ref: docs/features/email-sync/spec.md
-version: "1.2.0"
-status: in-progress
+version: "1.3.0"
+status: locked
 assignees:
   - Core Team
 target-milestone: V1.0
-updated: 2026-02-09
+updated: 2026-02-11
 ---
 
 # Email Sync — iOS/macOS Implementation Plan

@@ -44,6 +44,8 @@
 	<array>
 		<string>fetch</string>
 	</array>
+	<key>NSFaceIDUsageDescription</key>
+	<string>PrivateMail uses Face ID to protect your email when app lock is enabled.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>

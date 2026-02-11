@@ -2,12 +2,12 @@
 title: "Thread List — iOS/macOS Implementation Plan"
 platform: iOS, macOS
 spec-ref: docs/features/thread-list/spec.md
-version: "2.0.0"
-status: approved
+version: "2.1.0"
+status: locked
 assignees:
   - Core Team
 target-milestone: V1.0
-updated: 2026-02-08
+updated: 2026-02-11
 ---
 
 # Thread List — iOS/macOS Implementation Plan
