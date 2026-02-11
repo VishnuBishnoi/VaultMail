@@ -46,6 +46,8 @@
 	</array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>VaultMail uses Face ID to protect your email when app lock is enabled.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>
