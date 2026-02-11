@@ -103,7 +103,7 @@ updated: 2026-02-11
   - [x] `SearchIndexManager.swift` — @MainActor managing incremental indexing (single owner of all FTS5 + SearchIndex mutations)
     - `indexEmail(email:)` — insert into FTS5 + generate embedding + upsert SearchIndex
     - `removeEmail(emailId:)` — delete FTS5 row + delete SearchIndex entry
-    - `openIndex()` / `reindexIfNeeded()` — wired to app startup via PrivateMailApp.swift
+    - `openIndex()` / `reindexIfNeeded()` — wired to app startup via VaultMailApp.swift
   - [x] `AIProcessingQueue` delegates embedding work through `SearchIndexManager`
   - [x] Wired into app startup: `searchIndexManager.openIndex()` + `searchIndexManager.reindexIfNeeded()`
   - [x] `VectorSearchEngine.swift` — in-memory cosine similarity via Accelerate.vDSP_dotpr

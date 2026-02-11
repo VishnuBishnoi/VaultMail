@@ -53,11 +53,11 @@ This plan covers the foundational infrastructure for the privacy-first email cli
 ### 3.1 Project Structure
 
 ```
-PrivateMail/
-├── PrivateMail.xcodeproj
-├── PrivateMail/                      # Shared code
+VaultMail/
+├── VaultMail.xcodeproj
+├── VaultMail/                      # Shared code
 │   ├── App/
-│   │   ├── PrivateMailApp.swift
+│   │   ├── VaultMailApp.swift
 │   │   └── AppState.swift
 │   ├── Domain/
 │   │   ├── Models/
@@ -85,8 +85,8 @@ PrivateMail/
 │       ├── Extensions/
 │       ├── Utilities/
 │       └── Constants.swift
-├── PrivateMailiOS/
-├── PrivateMailMac/
+├── VaultMailiOS/
+├── VaultMailMac/
 └── Tests/
     ├── DomainTests/
     ├── DataTests/
@@ -99,11 +99,11 @@ PrivateMail/
 ```mermaid
 graph TD
     subgraph Targets
-        iOS["PrivateMailiOS"]
-        Mac["PrivateMailMac"]
+        iOS["VaultMailiOS"]
+        Mac["VaultMailMac"]
     end
 
-    subgraph SharedFramework["PrivateMail (Shared)"]
+    subgraph SharedFramework["VaultMail (Shared)"]
         App["App"]
         Domain["Domain"]
         Data["Data"]
