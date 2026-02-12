@@ -89,6 +89,9 @@ public struct MacOSMainView: View {
 
     @State private var accounts: [Account] = []
     @State private var folders: [Folder] = []
+    /// All folders across every account — used by the sidebar to show
+    /// every account's folder tree simultaneously.
+    @State private var allFolders: [Folder] = []
     @State private var threads: [VaultMailFeature.Thread] = []
     @State private var hasLoaded = false
 
@@ -183,7 +186,7 @@ public struct MacOSMainView: View {
             // SIDEBAR
             SidebarView(
                 accounts: accounts,
-                folders: folders,
+                folders: allFolders,
                 selectedAccount: $selectedAccount,
                 selectedFolder: $selectedFolder,
                 unreadCounts: unreadCounts,
@@ -514,8 +517,17 @@ public struct MacOSMainView: View {
                 hasLoaded = true
                 return
             }
+
+            // Load folders for ALL accounts so the sidebar shows every folder tree
+            var combined: [Folder] = []
+            for account in accounts {
+                let accountFolders = try await fetchThreads.fetchFolders(accountId: account.id)
+                combined.append(contentsOf: accountFolders)
+            }
+            allFolders = combined
+
             selectedAccount = firstAccount
-            folders = try await fetchThreads.fetchFolders(accountId: firstAccount.id)
+            folders = combined.filter { $0.account?.id == firstAccount.id }
             let inboxType = FolderType.inbox.rawValue
             selectedFolder = folders.first(where: { $0.folderType == inboxType }) ?? folders.first
             await loadThreadsAndCounts()
@@ -531,6 +543,8 @@ public struct MacOSMainView: View {
                         onInboxSynced: { _ in
                             if let fresh = try? await fetchThreads.fetchFolders(accountId: accountId) {
                                 folders = fresh
+                                // Update allFolders: replace this account's folders
+                                allFolders = allFolders.filter { $0.account?.id != accountId } + fresh
                                 let inboxType = FolderType.inbox.rawValue
                                 selectedFolder = fresh.first(where: { $0.folderType == inboxType }) ?? fresh.first
                             }
@@ -538,7 +552,9 @@ public struct MacOSMainView: View {
                         }
                     )
                     guard !Task.isCancelled else { return }
-                    folders = try await fetchThreads.fetchFolders(accountId: accountId)
+                    let freshFolders = try await fetchThreads.fetchFolders(accountId: accountId)
+                    folders = freshFolders
+                    allFolders = allFolders.filter { $0.account?.id != accountId } + freshFolders
                     if let currentType = selectedFolder?.folderType {
                         selectedFolder = folders.first(where: { $0.folderType == currentType }) ?? folders.first
                     }
@@ -635,7 +651,9 @@ public struct MacOSMainView: View {
 
     private func switchToAccount(_ account: Account) async {
         do {
-            folders = try await fetchThreads.fetchFolders(accountId: account.id)
+            let freshFolders = try await fetchThreads.fetchFolders(accountId: account.id)
+            folders = freshFolders
+            allFolders = allFolders.filter { $0.account?.id != account.id } + freshFolders
             let inboxType = FolderType.inbox.rawValue
             selectedFolder = folders.first(where: { $0.folderType == inboxType }) ?? folders.first
             await reloadThreads()
