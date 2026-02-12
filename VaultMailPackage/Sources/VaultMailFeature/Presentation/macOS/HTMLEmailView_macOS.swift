@@ -19,6 +19,20 @@ private enum SharedWebViewResources_macOS {
     }()
 }
 
+// MARK: - NonScrollingWKWebView
+
+/// A WKWebView subclass that forwards all scroll wheel events to its
+/// superview instead of handling them internally. This lets the outer
+/// SwiftUI ScrollView handle scrolling while the WKWebView is sized
+/// to its full content height.
+private final class NonScrollingWKWebView: WKWebView {
+    override func scrollWheel(with event: NSEvent) {
+        // Forward the scroll event to the next responder (parent view)
+        // instead of letting WKWebView handle it internally.
+        nextResponder?.scrollWheel(with: event)
+    }
+}
+
 /// macOS HTML email renderer using NSViewRepresentable + WKWebView.
 ///
 /// Shares sanitization config with iOS via HTMLSanitizer / TrackingPixelDetector.
@@ -71,21 +85,29 @@ struct HTMLEmailView_macOS: NSViewRepresentable {
         let contentController = WKUserContentController()
         contentController.add(coordinator, name: "heightChanged")
 
+        // Inject CSS at document start to prevent the page from being
+        // scrollable. This runs before any HTML content renders.
+        let noScrollCSS = """
+        var style = document.createElement('style');
+        style.textContent = 'html, body { overflow: hidden !important; }';
+        document.documentElement.appendChild(style);
+        """
+        let userScript = WKUserScript(
+            source: noScrollCSS,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        contentController.addUserScript(userScript)
+
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences = SharedWebViewResources_macOS.preferences
         configuration.websiteDataStore = SharedWebViewResources_macOS.dataStore
         configuration.userContentController = contentController
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        // Use NonScrollingWKWebView which forwards scroll events to parent
+        let webView = NonScrollingWKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = coordinator
         webView.setValue(false, forKey: "drawsBackground")
-        // Disable WKWebView's internal scrolling so the outer SwiftUI
-        // ScrollView handles all scrolling. The webView is sized to its
-        // content height via the heightChanged message handler.
-        if let scrollView = webView.enclosingScrollView {
-            scrollView.hasVerticalScroller = false
-            scrollView.hasHorizontalScroller = false
-        }
         return webView
     }
 
