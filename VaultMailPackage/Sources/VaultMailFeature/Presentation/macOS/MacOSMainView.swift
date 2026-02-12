@@ -208,6 +208,12 @@ public struct MacOSMainView: View {
                 },
                 onSelectFolder: { folder in
                     selectFolder(folder)
+                },
+                onAddAccount: {
+                    Task { await addAccountFromSidebar() }
+                },
+                onRemoveAccount: { account in
+                    Task { await removeAccountFromSidebar(account) }
                 }
             )
             .navigationSplitViewColumnWidth(min: 180, ideal: 220)
@@ -870,6 +876,71 @@ public struct MacOSMainView: View {
                 try? await Task.sleep(for: retryDelay)
                 retryDelay = min(retryDelay * 2, .seconds(60))
             }
+        }
+    }
+
+    // MARK: - Sidebar Account Actions
+
+    /// Adds a new account via OAuth directly from the sidebar.
+    /// Reuses the same logic as MacSettingsView's addAccount.
+    private func addAccountFromSidebar() async {
+        do {
+            let newAccount = try await manageAccounts.addAccountViaOAuth()
+            let freshAccounts = try await manageAccounts.getAccounts()
+            accounts = freshAccounts
+
+            // Sync the newly added account's folders
+            isSyncing = true
+            syncTask?.cancel()
+            syncTask = Task {
+                defer { isSyncing = false; syncTask = nil }
+                let isSelected = selectedAccount?.id == newAccount.id
+                await syncSingleAccount(newAccount.id, isSelected: isSelected)
+            }
+
+            // Notify Settings window (if open) to refresh
+            NotificationCenter.default.post(name: AppConstants.accountsDidChangeNotification, object: nil)
+        } catch {
+            // OAuth cancelled or failed — no action needed
+        }
+    }
+
+    /// Removes an account from the sidebar. Called after user confirms in the alert.
+    private func removeAccountFromSidebar(_ account: Account) async {
+        do {
+            let wasLast = try await manageAccounts.removeAccount(id: account.id)
+            if wasLast {
+                settings.isOnboardingComplete = false
+            }
+
+            let freshAccounts = try await manageAccounts.getAccounts()
+            accounts = freshAccounts
+
+            // Remove the account's folders from allFolders
+            allFolders = allFolders.filter { $0.account?.id != account.id }
+
+            if freshAccounts.isEmpty {
+                viewState = .empty
+                folders = []
+                threads = []
+                selectedAccount = nil
+                selectedFolder = nil
+                selectedThreadID = nil
+                return
+            }
+
+            // If the removed account was selected, switch to the first remaining
+            if selectedAccount?.id == account.id {
+                selectedAccount = freshAccounts.first
+                if let newAccount = selectedAccount {
+                    await switchToAccount(newAccount)
+                }
+            }
+
+            // Notify Settings window (if open) to refresh
+            NotificationCenter.default.post(name: AppConstants.accountsDidChangeNotification, object: nil)
+        } catch {
+            errorMessage = "Failed to remove account: \(error.localizedDescription)"
         }
     }
 

@@ -7,6 +7,9 @@ import SwiftUI
 /// Each account is expandable with system folders in fixed order,
 /// followed by custom labels, plus a virtual Outbox entry.
 ///
+/// Bottom bar provides quick access to Settings and Add Account.
+/// Right-click on account headers provides Remove Account option.
+///
 /// Spec ref: FR-MAC-02 (Sidebar — Folder and Account Navigation)
 struct SidebarView: View {
     let accounts: [Account]
@@ -19,6 +22,8 @@ struct SidebarView: View {
     let onSelectUnifiedInbox: () -> Void
     let onSelectAccount: (Account) -> Void
     let onSelectFolder: (Folder) -> Void
+    let onAddAccount: () -> Void
+    let onRemoveAccount: (Account) -> Void
 
     /// Tracks which accounts are expanded in the sidebar.
     @SceneStorage("macOS.sidebarExpandedAccounts")
@@ -26,29 +31,39 @@ struct SidebarView: View {
 
     @State private var expandedAccounts: Set<String> = []
     @State private var folderLoadError: Set<String> = []
+    @State private var isAddingAccount = false
+    @State private var showRemoveConfirmation = false
+    @State private var accountToRemove: Account?
 
     // MARK: - Body
 
     var body: some View {
-        List(selection: Binding<String?>(
-            get: { selectedFolder?.id },
-            set: { newId in
-                // Find and select the folder with this ID
-                if let folderId = newId,
-                   let folder = allFolders.first(where: { $0.id == folderId }) {
-                    onSelectFolder(folder)
+        VStack(spacing: 0) {
+            List(selection: Binding<String?>(
+                get: { selectedFolder?.id },
+                set: { newId in
+                    // Find and select the folder with this ID
+                    if let folderId = newId,
+                       let folder = allFolders.first(where: { $0.id == folderId }) {
+                        onSelectFolder(folder)
+                    }
+                }
+            )) {
+                // Unified Inbox
+                unifiedInboxRow
+
+                // Per-account sections
+                ForEach(accounts, id: \.id) { account in
+                    accountSection(for: account)
                 }
             }
-        )) {
-            // Unified Inbox
-            unifiedInboxRow
+            .listStyle(.sidebar)
 
-            // Per-account sections
-            ForEach(accounts, id: \.id) { account in
-                accountSection(for: account)
-            }
+            Divider()
+
+            // Bottom bar with settings and add account
+            sidebarBottomBar
         }
-        .listStyle(.sidebar)
         .onAppear {
             // Restore expanded accounts from SceneStorage
             expandedAccounts = Set(expandedAccountsData.split(separator: ",").map(String.init))
@@ -60,6 +75,49 @@ struct SidebarView: View {
         .onChange(of: expandedAccounts) {
             expandedAccountsData = expandedAccounts.joined(separator: ",")
         }
+        .alert("Remove Account", isPresented: $showRemoveConfirmation) {
+            Button("Remove", role: .destructive) {
+                if let account = accountToRemove {
+                    onRemoveAccount(account)
+                    accountToRemove = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                accountToRemove = nil
+            }
+        } message: {
+            if let account = accountToRemove {
+                Text("Remove \(account.email)? All local emails, drafts, and cached data for this account will be deleted.")
+            }
+        }
+    }
+
+    // MARK: - Bottom Bar
+
+    private var sidebarBottomBar: some View {
+        HStack(spacing: 12) {
+            SettingsLink {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.borderless)
+            .help("Settings")
+            .accessibilityLabel("Open Settings")
+
+            Button {
+                onAddAccount()
+            } label: {
+                Image(systemName: "plus")
+            }
+            .buttonStyle(.borderless)
+            .disabled(isAddingAccount)
+            .help("Add Account")
+            .accessibilityLabel("Add Account")
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
     // MARK: - All Folders Helper
@@ -121,6 +179,14 @@ struct SidebarView: View {
                 Text(account.email)
                     .font(selectedAccount?.id == account.id ? .body.bold() : .body)
                     .lineLimit(1)
+            }
+            .contextMenu {
+                Button(role: .destructive) {
+                    accountToRemove = account
+                    showRemoveConfirmation = true
+                } label: {
+                    Label("Remove Account", systemImage: "trash")
+                }
             }
         }
     }

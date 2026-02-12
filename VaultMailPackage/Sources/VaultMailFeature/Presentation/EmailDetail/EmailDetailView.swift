@@ -190,7 +190,7 @@ public struct EmailDetailView: View {
     private var loadedView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 8) {
+                VStack(spacing: 8) {
                     // Spam/phishing warning banner (FR-AI-06)
                     if hasSpamEmails {
                         spamWarningBanner
