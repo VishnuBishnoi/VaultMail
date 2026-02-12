@@ -126,7 +126,7 @@ public struct EmailDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar { toolbarContent }
-        .task { await loadThread() }
+        .task(id: threadId) { await loadThread() }
         .task(id: thread?.id) { await loadSmartReplies() }
         .overlay(alignment: .bottom) {
             if showUndoToast, let action = undoAction {

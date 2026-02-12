@@ -79,6 +79,13 @@ struct HTMLEmailView_macOS: NSViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = coordinator
         webView.setValue(false, forKey: "drawsBackground")
+        // Disable WKWebView's internal scrolling so the outer SwiftUI
+        // ScrollView handles all scrolling. The webView is sized to its
+        // content height via the heightChanged message handler.
+        if let scrollView = webView.enclosingScrollView {
+            scrollView.hasVerticalScroller = false
+            scrollView.hasHorizontalScroller = false
+        }
         return webView
     }
 
