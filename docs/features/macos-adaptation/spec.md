@@ -1,6 +1,6 @@
 ---
 title: "macOS Native Experience — Specification"
-version: "1.0.0"
+version: "1.1.0"
 status: draft
 created: 2026-02-12
 updated: 2026-02-12
@@ -14,6 +14,7 @@ depends-on:
   - docs/features/thread-list/spec.md
   - docs/features/email-detail/spec.md
   - docs/features/email-composer/spec.md
+  - docs/features/email-sync/spec.md
   - docs/features/search/spec.md
   - docs/features/settings-onboarding/spec.md
 ---
@@ -53,6 +54,7 @@ This specification defines the macOS-native user experience for the email client
 - **NG-05**: AppleScript / Shortcuts automation support (deferred to V2)
 - **NG-06**: Custom macOS icon dock badge beyond unread count (deferred to V2)
 - **NG-07**: Split-screen (macOS Stage Manager tiling) — standard `WindowGroup` behavior is sufficient
+- **NG-08**: Saved searches in the sidebar (deferred to V2)
 
 ---
 
@@ -68,9 +70,27 @@ The macOS client **MUST** use `NavigationSplitView` with three columns as the ro
 
 | Column | SwiftUI Role | Content | Min Width | Ideal Width |
 |--------|-------------|---------|-----------|-------------|
-| Sidebar | `sidebar` | Account selector, folder tree, saved searches | 180pt | 220pt |
+| Sidebar | `sidebar` | Account selector, folder tree | 180pt | 220pt |
 | Content | `content` | Thread list with category tabs | 280pt | 340pt |
 | Detail | `detail` | Email detail (threaded conversation) | 400pt | Remaining |
+
+**Column Visibility State Diagram**
+
+```mermaid
+stateDiagram-v2
+    [*] --> ThreeColumn: App launch (default)
+    ThreeColumn --> TwoColumn_NoSidebar: Toggle sidebar (⌘⌥S)
+    TwoColumn_NoSidebar --> ThreeColumn: Toggle sidebar (⌘⌥S)
+    ThreeColumn --> TwoColumn_NoDetail: No thread selected
+    TwoColumn_NoDetail --> ThreeColumn: Thread selected
+    ThreeColumn --> SingleColumn: Window too narrow (< min width)
+    SingleColumn --> ThreeColumn: Window resized wider
+
+    state ThreeColumn {
+        Sidebar --> Content: Folder selection
+        Content --> Detail: Thread selection
+    }
+```
 
 **Column Visibility**
 
@@ -132,7 +152,7 @@ The sidebar column **MUST** provide persistent, always-visible navigation for ac
 
 - Each configured account **MUST** be displayed as an expandable section with the account email address.
 - The currently active account **MUST** be visually distinguished (bold text or highlight).
-- Tapping an account header **MUST** expand/collapse its folder tree.
+- Clicking an account header **MUST** expand/collapse its folder tree.
 - The sidebar **MUST** display a "Unified Inbox" entry above or below the per-account sections. Selecting it **MUST** show merged threads from all accounts sorted by `latestDate` (per Thread List FR-TL-04).
 - In Unified Inbox mode, per-account folder trees **SHOULD** remain visible but greyed out. The user **MUST** select a specific account to navigate to its non-Inbox folders (per Thread List FR-TL-04 — system folders are per-account in unified mode).
 
@@ -184,7 +204,7 @@ The macOS client **MUST** provide a native toolbar using SwiftUI's `.toolbar` mo
 | Move | `.secondaryAction` | `folder` | Present "Move to Folder" sheet (Thread List FR-TL-03) | `⌘⇧M` | Thread(s) selected |
 | Flag/Star | `.secondaryAction` | `star` / `star.fill` | Toggle star on selected thread(s) | `⌘⇧L` | Thread(s) selected |
 | Mark Read/Unread | `.secondaryAction` | `envelope` / `envelope.open` | Toggle read state (Thread List FR-TL-03) | `⌘⇧U` | Thread(s) selected |
-| Sync | `.secondaryAction` | `arrow.clockwise` | Trigger incremental sync (Email Sync FR-SYNC-02) | `⌘⇧R` | Always |
+| Sync | `.secondaryAction` | `arrow.clockwise` | Trigger incremental sync (Email Sync FR-SYNC-02) | `⌃⇧R` | Always |
 | Search | `.automatic` | — | Inline `TextField` search field | `⌘F` | Always |
 | Sidebar Toggle | `.navigation` | `sidebar.leading` | Toggle sidebar visibility | `⌘⌥S` | Always |
 
@@ -206,7 +226,7 @@ The macOS client **MUST** provide a native toolbar using SwiftUI's `.toolbar` mo
 
 **Error Handling**
 
-- If a toolbar action fails (e.g., archive fails to sync), the client **MUST** revert the optimistic update and display an error toast: "Couldn't [action]. Tap to retry." (per Thread List FR-TL-03 and Email Sync FR-SYNC-05).
+- If a toolbar action fails (e.g., archive fails to sync), the client **MUST** revert the optimistic update and display an error toast: "Couldn't [action]. Click to retry." (per Thread List FR-TL-03 and Email Sync FR-SYNC-05).
 
 ### FR-MAC-04: Thread List (Content Column)
 
@@ -265,6 +285,30 @@ Thread interactions on macOS **MUST** use platform-appropriate patterns (context
 | Mark as Read / Unread | Toggle read state | `ManageThreadActionsUseCase` |
 | Star / Unstar | Toggle star | `ManageThreadActionsUseCase` |
 
+**Thread Selection State Diagram**
+
+```mermaid
+stateDiagram-v2
+    [*] --> None: No selection
+    None --> Single: Click thread
+    Single --> None: Click selected (deselect)
+    Single --> Single: Click different thread
+    Single --> Multi: ⌘-click another thread
+    Single --> Multi: ⇧-click (range)
+    Multi --> Multi: ⌘-click (toggle individual)
+    Multi --> Multi: ⇧-click (extend range)
+    Multi --> Single: Click single thread (reset)
+    Multi --> None: Escape key
+
+    state Single {
+        [*] --> DetailShown: Detail column shows thread
+    }
+
+    state Multi {
+        [*] --> BatchSummary: Detail column shows "[N] selected"
+    }
+```
+
 **Multi-Select**
 
 - `⌘`-click **MUST** toggle individual thread selection (add/remove from selection).
@@ -316,7 +360,7 @@ The email detail **MUST** render in the detail column of the `NavigationSplitVie
 - `⏎` **MUST** expand/collapse the selected message.
 - `⌘R` **MUST** reply to the latest message.
 - `⌘⇧R` **MUST** reply all to the latest message.
-- `⌘⇧F` **MUST** forward the latest message.
+- `⌘⇧E` **MUST** forward the latest message.
 - (Per Email Detail Section 7, macOS subsection.)
 
 **Error Handling**
@@ -342,8 +386,8 @@ The macOS client **MUST** support comprehensive keyboard shortcuts for all commo
 | `⌘⇧M` | Move to folder | Message | Thread(s) selected |
 | `⌘R` | Reply | Message | Thread selected |
 | `⌘⇧R` | Reply all | Message | Thread selected |
-| `⌘⇧F` | Forward | Message | Thread selected |
-| `⌘⇧R` (no thread) | Sync / refresh | View | Always |
+| `⌘⇧E` | Forward | Message | Thread selected |
+| `⌃⇧R` | Sync / refresh | View | Always |
 | `⌘,` | Settings | App | Always (built-in) |
 | `⌘W` | Close window | Window | Always (built-in) |
 | `⌘Q` | Quit | App | Always (built-in) |
@@ -363,8 +407,8 @@ The client **MUST** provide the following custom menu bar menus via `.commands`:
 
 - **File**: New Email (`⌘N`)
 - **Edit**: Find (`⌘F`), Select All (`⌘A`)
-- **Message**: Reply (`⌘R`), Reply All (`⌘⇧R`), Forward (`⌘⇧F`), Archive (`⌘⇧A`), Delete (`⌘⌫`), Mark Read/Unread (`⌘⇧U`), Star/Unstar (`⌘⇧L`), Move to Folder… (`⌘⇧M`)
-- **View**: Sidebar Toggle (`⌘⌥S`), Refresh (`⌘⇧R`)
+- **Message**: Reply (`⌘R`), Reply All (`⌘⇧R`), Forward (`⌘⇧E`), Archive (`⌘⇧A`), Delete (`⌘⌫`), Mark Read/Unread (`⌘⇧U`), Star/Unstar (`⌘⇧L`), Move to Folder… (`⌘⇧M`)
+- **View**: Sidebar Toggle (`⌘⌥S`), Refresh (`⌃⇧R`)
 
 **Error Handling**
 
@@ -427,7 +471,7 @@ The macOS window **MUST** be configured with appropriate sizing and behavior.
 |----------|-------|
 | Default size | 1200 × 800 pt |
 | Minimum size | 800 × 600 pt |
-| Remember size on relaunch | Yes (via `@SceneStorage` or `.defaultSize` + `.windowResizability`) |
+| Remember size on relaunch | Yes (via `@SceneStorage` or `.defaultSize` + `.windowResizability(.contentMinSize)`) |
 
 **Window Title**
 
@@ -442,7 +486,7 @@ WindowGroup {
     MacOSMainView()
 }
 .defaultSize(width: 1200, height: 800)
-.windowResizability(.contentSize)
+.windowResizability(.contentMinSize)
 .commands { AppCommands() }
 
 Settings {
@@ -459,7 +503,7 @@ Settings {
 - **Metric**: Time from window appearance to interactive three-pane layout with cached data
 - **Target**: < 500ms
 - **Hard Limit**: 1s
-- **Measurement**: Time from `WindowGroup` scene activation to first thread row visible with sidebar and detail rendered
+- **Measurement**: Time from `WindowGroup` scene activation to first thread row visible with sidebar and detail rendered. Measured with ≥1 cached thread in SwiftData. First-launch without cached data is excluded from this NFR (covered by Foundation NFR-PERF-05 initial sync time).
 
 ### NFR-MAC-02: Column Resize Performance
 
@@ -584,7 +628,7 @@ All use cases are called identically on macOS and iOS. No use case changes are r
 | `ManageThreadActionsUseCase` | `ThreadListView` swipe/menu | Toolbar / context menu / keyboard | None |
 | `SearchEmailsUseCase` | Search bottom tab | Toolbar search field | None |
 | `ComposeEmailUseCase` | Composer sheet | Composer window/sheet | None |
-| `SyncEmailsUseCase` | Pull-to-refresh | Toolbar sync button / `⌘⇧R` | None |
+| `SyncEmailsUseCase` | Pull-to-refresh | Toolbar sync button / `⌃⇧R` | None |
 | `DownloadAttachmentUseCase` | Tap attachment | Tap attachment / drag | None |
 | `IDLEMonitorUseCase` | `.task` on ThreadListView | `.task` on MacOSMainView | None |
 
@@ -667,3 +711,4 @@ graph TD
 | Version | Date | Author | Change Summary |
 |---------|------|--------|---------------|
 | 1.0.0 | 2026-02-12 | Core Team | Initial draft. Comprehensive macOS native experience specification covering three-pane layout (FR-MAC-01), sidebar (FR-MAC-02), toolbar (FR-MAC-03), thread list adaptation (FR-MAC-04), macOS interactions (FR-MAC-05), email detail with NSViewRepresentable HTML rendering (FR-MAC-06), keyboard shortcuts and menu bar (FR-MAC-07), multi-window compose (FR-MAC-08), macOS attachment handling (FR-MAC-09), and window configuration (FR-MAC-10). Five NFRs defined (window responsiveness, column resize, keyboard latency, accessibility, memory). Architecture diagrams for platform fork strategy and HTML rendering sharing. Five open questions flagged for review. |
+| 1.1.0 | 2026-02-12 | Core Team | Review round 1: Resolved ⌘⇧R shortcut conflict — changed Sync/Refresh to ⌃⇧R (was conflicting with Reply All). Changed Forward shortcut from ⌘⇧F to ⌘⇧E (Outlook convention — avoids conflict with macOS Find in Page convention). Added missing `email-sync/spec.md` to depends-on. Removed undocumented "saved searches" from sidebar column definition and added NG-08 to defer to V2. Added Mermaid state diagrams for column visibility (FR-MAC-01) and thread selection (FR-MAC-05) per Constitution SF-03. Fixed `.windowResizability(.contentSize)` to `.contentMinSize` (FR-MAC-10) for correct free-resize behavior. Clarified NFR-MAC-01 measurement scope (requires ≥1 cached thread, first-launch excluded). Replaced iOS language ("Tap to retry", "Tapping") with macOS conventions ("Click to retry", "Clicking"). |
