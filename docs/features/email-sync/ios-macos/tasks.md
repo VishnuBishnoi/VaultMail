@@ -62,7 +62,7 @@ updated: 2026-02-16
 - **Status**: `done`
 - **Spec ref**: Email Sync spec, FR-SYNC-07
 - **Validation ref**: AC-F-07
-- **Description**: Implement SMTP client for sending emails via Gmail SMTP with XOAUTH2. Support queuing for offline sends.
+- **Description**: Implement SMTP client supporting provider-configured authentication (XOAUTH2 or PLAIN), transport security (implicit TLS or STARTTLS), and conditional sent-folder append via `requiresSentAppend`. Includes offline send queue with auth-mechanism-aware error handling.
 - **Deliverables**:
   - [x] `SMTPClient.swift` — actor with connect, authenticate (XOAUTH2), send; connection retry with exponential backoff (5s/15s/45s)
   - [x] `SMTPSession.swift` — 395 lines; Network.framework, port 465 implicit TLS, SASL base64 encoding, dot-stuffing, multi-line response parsing, timeout guards
@@ -71,7 +71,11 @@ updated: 2026-02-16
   - [x] Send queue via `ComposeEmailUseCase.executeSend()` — full pipeline: `.queued` → `.sending` → `.sent`/`.failed`, OAuth token refresh, real `smtpClient.sendMessage()`
   - [x] Retry logic with exponential backoff (3 retries)
   - [x] `SMTPClientProtocol` + `MockSMTPClient` for testability
-- **Notes**: Full production SMTP implementation. `ComposeEmailUseCase.executeSend()` orchestrates the complete send pipeline including OAuth refresh and MIME encoding.
+  - [ ] PLAIN auth support for SMTP (SASL PLAIN over TLS) — deferred to IOS-MP-02
+  - [ ] STARTTLS transport for SMTP (port 587) — deferred to IOS-MP-03
+  - [ ] Conditional sent-folder APPEND via `requiresSentAppend` flag — deferred to IOS-MP-12
+  - [ ] Auth-mechanism-aware error handling: OAuth → token refresh; PLAIN → credential error (no refresh) — deferred to IOS-ES-04
+- **Notes**: Current implementation covers Gmail XOAUTH2 + implicit TLS (port 465). Provider-agnostic extensions (PLAIN auth, STARTTLS, conditional sent append, multi-auth error handling) are tracked in Multi-Provider IMAP tasks (IOS-MP-02, IOS-MP-03, IOS-MP-12) and Email Sync multi-account tasks (IOS-ES-04). See FR-SYNC-07 spec v1.3.4 for full provider-agnostic requirements.
 
 ### IOS-F-08: Email Repository
 

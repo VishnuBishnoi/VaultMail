@@ -18,7 +18,7 @@ updated: 2026-02-16
 
 This plan covers the IMAP client, sync engine, SMTP client, email repository, and core domain use cases. These form the data engine that powers all email features.
 
-**Current status (v1.2.0):** IMAP client, sync engine, IDLE monitoring, background sync, attachment download, and all domain use cases are implemented and tested (549 tests, 38 suites). SMTP client remains TODO.
+**Current status (v1.4.0):** IMAP client, sync engine, IDLE monitoring, background sync, attachment download, SMTP client, and all domain use cases are implemented and tested (627+ tests, 54 suites). Multi-account sync orchestration (FR-SYNC-11..18) is tracked as Phase 6 below.
 
 ---
 
@@ -114,8 +114,10 @@ classDiagram
 | `ManageThreadActionsUseCase.swift` | Domain/UseCases | Archive/delete/star/read with IMAP flag sync | Done |
 | `FetchThreadsUseCase.swift` | Domain/UseCases | Thread fetching with AI category filters + pagination | Done |
 | `ManageAccountsUseCase.swift` | Domain/UseCases | Account CRUD + re-authentication | Done |
-| `SMTPClient.swift` | Data/Network | Email sending (not yet implemented) | TODO |
-| `SendEmailUseCase.swift` | Domain/UseCases | Send + offline queue (SMTP stubbed) | Partial |
+| `SMTPClient.swift` | Data/Network | SMTP actor with connect, authenticate (XOAUTH2), send | Done |
+| `SMTPSession.swift` | Data/Network | Network.framework, port 465 TLS, SASL base64 encoding, dot-stuffing | Done |
+| `MIMEEncoder.swift` | Data/Network | MIME message construction (headers, body, attachments) | Done |
+| `SendEmailUseCase.swift` | Domain/UseCases | Send + offline queue via `ComposeEmailUseCase.executeSend()` | Done |
 
 ### Presentation Wiring
 
@@ -136,7 +138,7 @@ classDiagram
 |---------|-------------|----------|-------------|--------|
 | IOS-F-05 | IMAP client (connect, authenticate, list folders, IDLE, connection management) | FR-SYNC-01, FR-SYNC-03, FR-SYNC-09 | IOS-F-04 (Account Management) | **Done** |
 | IOS-F-06 | Sync engine (full sync, incremental, IDLE monitor, background sync, threading, flag sync, attachments) | FR-SYNC-01, FR-SYNC-02, FR-SYNC-04, FR-SYNC-05, FR-SYNC-06, FR-SYNC-08, FR-SYNC-10 | IOS-F-05 | **Done** |
-| IOS-F-07 | SMTP client (send, queue) | FR-SYNC-07 | IOS-F-04 (Account Management) | TODO |
+| IOS-F-07 | SMTP client (send, queue) | FR-SYNC-07 | IOS-F-04 (Account Management) | **Done** |
 | IOS-F-08 | Email repository implementation | All FRs | IOS-F-02 (Foundation), IOS-F-06, IOS-F-07 | **Done** (IMAP APPEND + LRU cache remaining) |
 | IOS-F-10 | Domain use cases (Sync, Fetch, Send, ManageAccounts, IDLE, Download, Actions) | Foundation Section 6 | IOS-F-08, IOS-F-09 (Account Management) | **Done** |
 
@@ -196,4 +198,4 @@ These tasks implement the multi-account sync requirements added in Email Sync sp
 | `IDLEMonitorUseCaseTests` | 5 | IDLE stream emission, error handling, connection lifecycle |
 | `BackgroundSyncSchedulerTests` | 4 | Task identifier, initialization, registration, scheduling |
 | `DownloadAttachmentUseCaseTests` | 20+ | IMAP download, base64/QP/7bit decode, security warnings, cellular warnings, errors |
-| All suites combined | 549 | 38 suites, all passing |
+| All suites combined | 627+ | 54 suites, all passing |
