@@ -1,9 +1,9 @@
 ---
 title: "Multi-Provider IMAP — Specification"
-version: "1.0.0"
+version: "1.1.0"
 status: draft
 created: 2026-02-11
-updated: 2026-02-11
+updated: 2026-02-16
 authors:
   - Core Team
 reviewers: []
@@ -78,6 +78,7 @@ Each provider entry **MUST** contain:
 | `idleRefreshInterval` | `TimeInterval` | Seconds between IDLE re-issue |
 | `folderNameMap` | `[String: FolderType]` | Provider-specific IMAP folder name → `FolderType` fallback mapping |
 | `excludedFolders` | `[String]` | IMAP folder paths to exclude from sync |
+| `requiresSentAppend` | `Bool` | Whether the client must APPEND to Sent folder after SMTP send (Gmail = `false`, all others = `true`) |
 
 **Built-in Provider Entries**
 
@@ -652,6 +653,59 @@ The sync engine (`SyncEmailsUseCase`) **MUST** work identically across all provi
 
 - IDLE behavior remains the same across all providers. Only the refresh interval varies (per FR-MPROV-09).
 
+**Draft Sync Behavior**
+
+- Gmail auto-saves drafts to `[Gmail]/Drafts` with the `\Draft` flag.
+- For non-Gmail providers, after saving a draft locally, the client **MUST** issue IMAP `APPEND` to the provider's Drafts folder (identified via FR-MPROV-08) with the `\Draft` flag.
+- If the provider's Drafts folder cannot be identified, the client **MUST** save the draft locally only and display a warning: "Drafts cannot be synced to this provider."
+
+**Sent Folder Post-Send Behavior**
+
+- Gmail automatically copies sent messages to the Sent folder server-side. The client **MUST NOT** issue an IMAP `APPEND` to Sent for Gmail accounts (this would create duplicates).
+- For all non-Gmail providers (Outlook, Yahoo, iCloud, custom), the client **MUST** issue an IMAP `APPEND` to the provider's Sent folder after successful SMTP delivery. The message **MUST** include the `\Seen` flag.
+- The provider behavior **MUST** be encoded in the provider registry as a `requiresSentAppend: Bool` field (Gmail = `false`, all others = `true`).
+
+**Flag Support Variance**
+
+- Not all providers support `\Flagged` (starred). If the server rejects a `STORE +FLAGS (\Flagged)` command with `NO`, the client **MUST** surface the error: "This provider does not support starred emails." The local star state **MUST** be reverted.
+- The client **MUST** always attempt flag operations and handle rejection gracefully, rather than pre-checking provider capabilities.
+
+### FR-MPROV-14: Multi-Account Sync (Cross-Reference)
+
+> **Note**: Multi-account sync orchestration, IDLE monitoring, background sync, offline send queue, unified inbox, sync observability, and sync diagnostics are defined in the **Email Sync spec** (FR-SYNC-11 through FR-SYNC-18). This spec defines only the provider-specific aspects; the Email Sync spec is the single source of truth for all sync behavior.
+
+The multi-provider connection pool **MUST** enforce a global limit in addition to per-provider limits (FR-MPROV-09):
+
+- The total number of IMAP connections across all accounts **MUST NOT** exceed **30**.
+- If the global limit is reached, connection checkout requests **MUST** be queued with priority given to the currently-viewed account.
+- When a connection is returned to any account's pool, the highest-priority waiting request (across all accounts) **MUST** be served first.
+- Connections idle for more than **5 minutes** in non-active accounts **MUST** be closed proactively to free resources.
+- The connection pool **MUST** log (debug-level) when connections are closed due to idle timeout.
+- If the global limit prevents a sync operation from starting, the operation **MUST** be queued (not failed). The queue timeout remains 30 seconds per Email Sync FR-SYNC-09.
+
+### FR-MPROV-15: Data Migration Validation
+
+**Description**
+
+The SwiftData migration for new Account model fields (FR-MPROV-10) **MUST** be validated to ensure zero data loss for existing accounts.
+
+**Automatic Defaults**
+
+- On app upgrade, existing accounts with nil `provider` **MUST** be automatically populated with `provider = "gmail"` (since only Gmail was supported pre-migration).
+- Existing accounts **MUST** receive `imapSecurity = "tls"` and `smtpSecurity = "tls"` defaults.
+- The migration **MUST NOT** alter any existing sync state (`uidValidity`, `lastSyncDate`, `lastSyncedUID`, folder data, emails, threads).
+
+**Migration Failure**
+
+- If the SwiftData lightweight migration fails, the app **MUST NOT** crash.
+- The app **MUST** present a recovery flow: "Your email data needs to be refreshed. Your accounts are safe." → trigger re-authentication flow for all accounts.
+- Keychain credentials **MUST** survive a migration failure (they are stored independently of SwiftData).
+
+**Validation**
+
+- The migration **MUST** be tested with accounts that have active sync state (UIDs, UIDVALIDITY, folders, threads, emails) to verify nothing is lost.
+- A unit test **MUST** verify that pre-migration Account entities load correctly with default values for new fields.
+
 ---
 
 ## 4. Non-Functional Requirements
@@ -692,6 +746,14 @@ The sync engine (`SyncEmailsUseCase`) **MUST** work identically across all provi
 - **Target**: TLS 1.2 or higher for all STARTTLS connections
 - **Hard Limit**: Connections using TLS < 1.2 **MUST** be rejected (per Email Sync NFR-SYNC-05)
 
+### NFR-MPROV-07: Global Connection Resource Usage
+
+- **Metric**: Total IMAP connections across all accounts
+- **Target**: ≤ 30 concurrent connections system-wide
+- **Hard Limit**: Must not exceed 30 connections. Idle connections on non-active accounts **MUST** be reclaimed within 5 minutes.
+
+> **Note**: Multi-account sync throughput (NFR-SYNC-06), error isolation (NFR-SYNC-07), and sync status latency (NFR-SYNC-09) are defined in the Email Sync spec.
+
 ---
 
 ## 5. Data Model
@@ -727,6 +789,8 @@ public enum AuthMechanism: String, Codable, Sendable {
     case plain      // iCloud, Yahoo, generic IMAP
 }
 ```
+
+> **Note**: `SyncPhase`, `IDLEStatus`, and `SyncEvent` types are defined in the Email Sync spec (Section 5).
 
 ### Account Model Changes
 
@@ -800,7 +864,7 @@ graph TD
         OutlookMapper["OutlookFolderNameMap"]
         YahooMapper["YahooFolderNameMap"]
         ICloudMapper["ICloudFolderNameMap"]
-        ConnPool["ConnectionPool (per-provider limits)"]
+        ConnPool["ConnectionPool (per-provider + global limits)"]
     end
 
     Presentation --> Domain
@@ -821,6 +885,8 @@ graph TD
     ManageAccounts --> AutoDiscovery
     ConnPool --> IMAPSession
 ```
+
+> **Note**: `SyncCoordinator`, `SyncLogger`, `SyncStatusIndicator`, and `SyncDebugView` are defined in the Email Sync spec (Section 6). This diagram shows only the provider-specific components introduced by this spec.
 
 ### Key Architectural Decisions
 
@@ -870,6 +936,8 @@ graph TD
 | OQ-03 | Should Microsoft 365 organizational accounts (with tenant-specific auth) be supported in V1, or only consumer Outlook.com accounts? | Core Team | Before Outlook implementation |
 | OQ-04 | Should the Mozilla ISPDB auto-discovery cache be time-limited (e.g., 30 days) or permanent? | Engineering Lead | Before auto-discovery implementation |
 
+> **Note**: Open questions about sync debug view visibility (OQ-01), IDLE connection limits (OQ-02), and log privacy (OQ-03) have been moved to the Email Sync spec.
+
 ---
 
 ## 10. Revision History
@@ -877,3 +945,4 @@ graph TD
 | Version | Date | Author | Change Summary |
 |---------|------|--------|---------------|
 | 1.0.0 | 2026-02-11 | Core Team | Initial draft. Defines multi-provider IMAP support: provider registry, XOAUTH2 + PLAIN auth, STARTTLS, Outlook OAuth, app password flow, auto-discovery, manual setup, provider-agnostic folder mapping, per-provider connection config, Account model extensions, onboarding UI updates, OAuthManager refactoring, and sync compatibility. |
+| 1.1.0 | 2026-02-16 | Core Team | Multi-account sync gap analysis. Extended FR-MPROV-13 with draft sync, sent folder post-send, and flag support variance behaviors. Added `requiresSentAppend` to provider registry schema. Added FR-MPROV-14 (Multi-Account Sync cross-reference + global connection pool limits) and FR-MPROV-15 (Data Migration Validation). Added NFR-MPROV-07 (Global Connection Resource Usage). Moved sync orchestration, IDLE monitoring, background sync, send queue, unified inbox, observability, and debug view requirements to Email Sync spec v1.3.0 (FR-SYNC-11 through FR-SYNC-18) as the canonical location for all sync behavior. |
