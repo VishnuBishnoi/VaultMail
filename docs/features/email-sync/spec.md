@@ -795,13 +795,50 @@ Refer to Foundation spec Section 6. This feature uses:
 ## 7. Platform-Specific Considerations
 
 ### iOS
-- Background app refresh via `BGAppRefreshTask` for periodic incremental sync (headers-only, 30s budget).
-- IMAP IDLE active only while app is foregrounded. When app enters background, IDLE is terminated gracefully.
+- Background app refresh via `BGAppRefreshTask` for periodic incremental sync (headers-only, 30s budget). See FR-SYNC-13 for multi-account background sync prioritization.
+- IMAP IDLE active only while app is foregrounded. When app enters background, IDLE connections **MUST** be terminated gracefully.
 - Initial sync **MUST NOT** be performed in background — only foreground.
+- The global IDLE connection limit of **5** (FR-SYNC-12) applies due to device resource constraints.
+- Sync status indicators (FR-SYNC-17) appear in the navigation bar toolbar area.
 
 ### macOS
-- IMAP IDLE **MAY** remain active while the app window is open (macOS does not restrict background network for foreground apps).
-- No background task budget limitations — full incremental sync may run when triggered by a timer.
+
+**IDLE Behavior**
+
+- IMAP IDLE **MUST** remain active for **all active accounts** while any app window is open. macOS does not restrict background network for foreground apps.
+- The global IDLE connection limit of 5 (FR-SYNC-12) **DOES NOT** apply on macOS. The client **MUST** maintain one IDLE connection per active account without an artificial cap, since the macOS sidebar displays all accounts simultaneously and users expect real-time unread counts across all visible accounts.
+- IDLE connections **MUST** be torn down only when the last app window is closed (app termination or `applicationShouldTerminate`), not on window deactivation or loss of focus.
+
+**Background Sync**
+
+- `BGAppRefreshTask` (FR-SYNC-13) is **not available** on macOS. Background sync **MUST** instead use a periodic `Timer` (interval: 5 minutes) to trigger incremental sync for all accounts whose `lastSyncDate` is older than 5 minutes.
+- The periodic timer **MUST** run as long as the app is open. It serves as a fallback for accounts whose IDLE connections have dropped.
+- Full incremental sync (headers + bodies) **MAY** run in the timer callback since macOS has no time-budget limitation.
+
+**Sidebar Multi-Account Visibility**
+
+- The macOS sidebar displays all accounts and their folder trees simultaneously (per macOS Adaptation FR-MAC-02). This means:
+  - Unread counts for **every account's every folder** are visible at all times.
+  - Per-account IDLE monitoring (FR-SYNC-12) is **critical** on macOS — without it, non-selected accounts show stale unread counts.
+  - Per-account sync status indicators (FR-SYNC-17) **MUST** appear inline in the sidebar next to each account name (spinner while syncing, warning icon on error), not only in the toolbar.
+
+**Sync Status in Sidebar**
+
+- Each account row in the macOS sidebar **MUST** show:
+  - A spinner if the account is currently syncing.
+  - An orange warning icon if the account's last sync failed (tooltip with error message on hover).
+  - A red badge if the account is inactive (requires re-authentication).
+  - Normal state (no indicator) when the account is up-to-date and IDLE is active.
+- The sidebar bottom bar **MAY** show a global sync summary (e.g., "All accounts synced" or "2 accounts have errors").
+
+**Multi-Window Considerations**
+
+- If the user opens multiple compose windows (FR-MAC-07), each compose window's send operation **MUST** route through the correct account's SMTP pipeline. The compose window **MUST** display which account is sending.
+- The Sync Debug View (FR-SYNC-18) on macOS **MUST** be accessible from the macOS Settings window (Cmd+comma) → About tab → "Sync Diagnostics", consistent with FR-MAC-10.
+
+**Connection Pool**
+
+- On macOS, the idle connection cleanup timeout (FR-SYNC-16) for non-active accounts **SHOULD** be relaxed to **15 minutes** (vs 5 minutes on iOS), since macOS has more available resources and all accounts are visible in the sidebar.
 
 ---
 
