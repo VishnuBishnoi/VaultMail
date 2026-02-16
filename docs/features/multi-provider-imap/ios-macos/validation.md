@@ -32,7 +32,7 @@ last-validated: null
 | FR-MPROV-11 | Onboarding and account setup UI | MUST | AC-MP-10 | Both | — (IOS-MP-10) |
 | FR-MPROV-12 | OAuthManager refactoring | MUST | AC-MP-07 | Both | — (IOS-MP-07) |
 | FR-MPROV-13 | Email sync compatibility (archive, delete, draft, sent) | MUST | AC-MP-12 | Both | — (IOS-MP-12) |
-| FR-MPROV-14 | Multi-account sync (cross-reference) | MUST | AC-ES-06 | Both | — (cross-ref to Email Sync) |
+| FR-MPROV-14 | Multi-account sync (cross-reference) | MUST | AC-MP-13, AC-ES-06 | Both | — (AC-MP-13 covers global pool in IOS-MP-13; AC-ES-06 cross-ref to Email Sync) |
 | FR-MPROV-15 | Data migration validation | MUST | AC-MP-14 | Both | — (IOS-MP-14) |
 | NFR-MPROV-01 | Auto-discovery speed (< 5s) | MUST | AC-MP-08 | Both | — |
 | NFR-MPROV-02 | Connection test speed (< 10s) | MUST | AC-MP-09 | Both | — |

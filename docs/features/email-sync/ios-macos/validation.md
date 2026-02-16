@@ -22,6 +22,7 @@ last-validated: 2026-02-16
 | FR-SYNC-01 | Full sync | MUST | AC-F-06 | Both | **Implemented** — `SyncEmailsUseCase.syncAccount()` with configurable sync window, cross-folder dedup, threading |
 | FR-SYNC-02 | Incremental sync | MUST | AC-F-06b | Both | **Implemented** — UID-based incremental via `folder.lastSyncDate`, UIDVALIDITY change detection |
 | FR-SYNC-03 | Real-time updates (IDLE) | MUST | AC-F-05 | Both | **Implemented** — `IDLEMonitorUseCase` + `BackgroundSyncScheduler` (BGAppRefreshTask on iOS) |
+| FR-SYNC-04 | Sync state machine | MUST | AC-F-06 | Both | **Implemented** — `SyncEmailsUseCase` state flow: Idle → Connecting → Authenticating → SyncingFolders → SyncingHeaders → SyncingBodies → Indexing → Idle; error/retry paths included |
 | FR-SYNC-05 | Conflict resolution | MUST | AC-F-06 | Both | **Implemented** — server-wins for flags; local optimistic updates via `ManageThreadActionsUseCase` |
 | FR-SYNC-06 | Threading algorithm | MUST | AC-F-06 | Both | **Implemented** — References/In-Reply-To + subject-based fallback with 30-day window |
 | FR-SYNC-07 | Email sending (SMTP) | MUST | AC-F-07 | Both | **Partial** — Gmail XOAUTH2 + implicit TLS implemented; provider-agnostic MUST behaviors (PLAIN auth, STARTTLS, conditional `requiresSentAppend`, auth-mechanism-aware errors) deferred to IOS-MP-02/03/12 and IOS-ES-04 |

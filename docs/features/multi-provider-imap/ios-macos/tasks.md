@@ -94,7 +94,7 @@ updated: 2026-02-16
 - **Plan phase**: Phase 2
 - **Description**: Implement OAuth 2.0 for Microsoft accounts using Microsoft Entra (Azure AD). Includes PKCE flow via `ASWebAuthenticationSession`, id_token JWT decode for email resolution, and token refresh.
 - **Deliverables**:
-  - [ ] `MicrosoftOAuthConfig.swift` — Entra auth/token endpoints, scopes (`IMAP.AccessAsUser.All SMTP.Send offline_access openid email profile`), redirect URI
+  - [ ] `MicrosoftOAuthConfig.swift` — Entra auth/token endpoints, scopes (`https://outlook.office365.com/IMAP.AccessAsUser.All https://outlook.office365.com/SMTP.Send offline_access openid email profile`), redirect URI
   - [ ] id_token JWT decode: extract `email` claim, fall back to `preferred_username` (FR-MPROV-03)
   - [ ] id_token OIDC validation (issuer, audience, expiry)
   - [ ] PKCE flow via `ASWebAuthenticationSession` (same pattern as Gmail)
@@ -254,7 +254,7 @@ updated: 2026-02-16
 
 - **Status**: `todo`
 - **Spec ref**: Multi-Provider IMAP spec, FR-MPROV-09, FR-MPROV-14
-- **Validation ref**: AC-MP-13
+- **Validation ref**: AC-MP-13, AC-ES-06 (FR-MPROV-14 global pool cross-ref)
 - **Plan phase**: Phase 4
 - **Description**: Update `ConnectionPool` to read per-provider `maxConnections` and IDLE refresh intervals from the provider registry. Enforce global 30-connection limit.
 - **Deliverables**:
