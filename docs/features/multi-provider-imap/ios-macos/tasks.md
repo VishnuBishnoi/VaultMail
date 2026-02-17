@@ -3,8 +3,8 @@ title: "Multi-Provider IMAP — iOS/macOS Task Breakdown"
 platform: iOS, macOS
 plan-ref: docs/features/multi-provider-imap/ios-macos/plan.md
 version: "1.0.0"
-status: draft
-updated: 2026-02-16
+status: locked
+updated: 2026-02-17
 ---
 
 # Multi-Provider IMAP — iOS/macOS Task Breakdown

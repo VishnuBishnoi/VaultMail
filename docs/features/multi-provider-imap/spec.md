@@ -1,9 +1,9 @@
 ---
 title: "Multi-Provider IMAP — Specification"
-version: "1.1.0"
-status: draft
+version: "1.2.0"
+status: locked
 created: 2026-02-11
-updated: 2026-02-16
+updated: 2026-02-17
 authors:
   - Core Team
 reviewers: []
@@ -968,3 +968,4 @@ graph TD
 | 1.1.1 | 2026-02-16 | Core Team | PR review fixes (round 1). **P1**: Fixed Outlook OAuth token audience conflict — replaced Graph API `/me` email resolution with `id_token` JWT claims (`openid email profile` scopes); added OIDC validation requirements; updated sequence diagram and external prerequisites. **P2**: Removed `.oauthbearer` from FR-MPROV-01 registry schema `authMechanism` (contradicted Section 5 enum and Alternatives Considered). **P3**: Unified migration semantics — fields are `String?` (nullable) in SwiftData schema, app-level computed properties apply defaults for `nil`; removed contradictory "defaulted" language from FR-MPROV-10 and aligned FR-MPROV-15. |
 | 1.1.2 | 2026-02-16 | Core Team | PR review fixes (round 2). **P2**: FR-MPROV-14 — replaced hardcoded 5-minute idle cleanup with cross-reference to Email Sync FR-SYNC-16 platform-specific timeouts (5 min iOS, 15 min macOS). NFR-MPROV-07 — same alignment. **P2**: FR-MPROV-12 — replaced `emailResolverURL: URL` with `emailResolution: EmailResolutionStrategy` enum (`.userinfoEndpoint(URL)` for Gmail, `.idTokenClaims` for Outlook) to match Outlook's id_token-based resolution. Fixed Outlook scopes to use fully-qualified resource scopes (`https://outlook.office365.com/...`) matching FR-MPROV-03. |
 | 1.1.3 | 2026-02-16 | Core Team | PR review fixes (round 3). **P2**: FR-MPROV-12 — fixed Gmail OAuth scope to `https://mail.google.com/` only (was `https://mail.google.com/ email profile` which violated Account Management FR-ACCT-01 and Constitution LG-02 minimal scope principle). Replaced `.userinfoEndpoint` with `.userProvided` strategy for Gmail (email resolution uses user-entered address validated via IMAP connection test, no userinfo API call needed). Added explicit note on Gmail scope compliance. |
+| 1.2.0 | 2026-02-17 | Core Team | **Spec locked for implementation.** All 15 functional requirements (FR-MPROV-01 through FR-MPROV-15), 7 non-functional requirements (NFR-MPROV-01 through NFR-MPROV-07), and downstream artifacts (plan, tasks, validation) are finalized. 4 open questions (OQ-01 through OQ-04) remain as pre-implementation blockers tracked in tasks.md. Implementation order: STARTTLS spike first to derisk; IOS-MP-05 (Outlook OAuth) deferred until Azure AD app registration resolves OQ-01. |

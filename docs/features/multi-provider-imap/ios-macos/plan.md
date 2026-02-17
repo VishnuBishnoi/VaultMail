@@ -3,7 +3,7 @@ title: "Multi-Provider IMAP — iOS/macOS Implementation Plan"
 platform: iOS, macOS
 spec-ref: docs/features/multi-provider-imap/spec.md
 version: "1.0.0"
-status: draft
+status: locked
 assignees:
   - Core Team
 target-milestone: V2.0

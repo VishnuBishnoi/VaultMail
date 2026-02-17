@@ -5,7 +5,7 @@ plan-refs:
   - docs/features/multi-provider-imap/ios-macos/plan.md
   - docs/features/multi-provider-imap/ios-macos/tasks.md
 version: "1.0.0"
-status: draft
+status: locked
 last-validated: null
 ---
 
