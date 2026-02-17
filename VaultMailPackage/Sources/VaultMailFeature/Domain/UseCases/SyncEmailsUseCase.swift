@@ -140,17 +140,17 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
         let account = try await findAccount(id: accountId)
         NSLog("[Sync] Found account: \(account.email), host: \(account.imapHost):\(account.imapPort)")
 
-        NSLog("[Sync] Getting access token...")
-        let token = try await getAccessToken(for: account)
-        NSLog("[Sync] Got access token (length: \(token.count))")
+        NSLog("[Sync] Resolving credentials...")
+        let imapCredential = try await resolveIMAPCredential(for: account)
+        NSLog("[Sync] Credentials resolved")
 
         NSLog("[Sync] Checking out IMAP connection...")
         let client = try await connectionProvider.checkoutConnection(
             accountId: account.id,
             host: account.imapHost,
             port: account.imapPort,
-            email: account.email,
-            accessToken: token
+            security: account.resolvedImapSecurity,
+            credential: imapCredential
         )
         NSLog("[Sync] IMAP connection established")
 
@@ -207,20 +207,24 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
     ) async throws -> [Email] {
         NSLog("[Sync] syncAccountInboxFirst started for \(accountId)")
         let account = try await findAccount(id: accountId)
-        let token = try await getAccessToken(for: account)
+        let imapCredential = try await resolveIMAPCredential(for: account)
 
         let client = try await connectionProvider.checkoutConnection(
             accountId: account.id,
             host: account.imapHost,
             port: account.imapPort,
-            email: account.email,
-            accessToken: token
+            security: account.resolvedImapSecurity,
+            credential: imapCredential
         )
         NSLog("[Sync] IMAP connection established")
 
         do {
             // 1. Sync folder list (single LIST command — fast)
             let imapFolders = try await client.listFolders()
+            NSLog("[Sync] LIST returned \(imapFolders.count) folders, provider=\(account.resolvedProvider.rawValue)")
+            for f in imapFolders {
+                NSLog("[Sync]   folder: \(f.imapPath) attrs=\(f.attributes)")
+            }
             let syncableFolders = try await syncFolders(
                 imapFolders: imapFolders,
                 account: account
@@ -294,7 +298,7 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
     @discardableResult
     public func syncFolder(accountId: String, folderId: String) async throws -> [Email] {
         let account = try await findAccount(id: accountId)
-        let token = try await getAccessToken(for: account)
+        let imapCredential = try await resolveIMAPCredential(for: account)
 
         let folders = try await emailRepository.getFolders(accountId: account.id)
         guard let folder = folders.first(where: { $0.id == folderId }) else {
@@ -305,8 +309,8 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
             accountId: account.id,
             host: account.imapHost,
             port: account.imapPort,
-            email: account.email,
-            accessToken: token
+            security: account.resolvedImapSecurity,
+            credential: imapCredential
         )
 
         do {
@@ -341,25 +345,41 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
         return account
     }
 
-    private func getAccessToken(for account: Account) async throws -> String {
-        // Try to refresh the token (handles expiry checks internally)
-        do {
-            NSLog("[Sync] Refreshing token for account \(account.id)...")
-            let token = try await accountRepository.refreshToken(for: account.id)
-            NSLog("[Sync] Token refreshed successfully, expires: \(token.expiresAt)")
-            return token.accessToken
-        } catch {
-            NSLog("[Sync] Token refresh failed: \(error), trying existing token...")
-            // If refresh fails, try using existing token from keychain
-            if let existing = try await keychainManager.retrieve(for: account.id) {
-                NSLog("[Sync] Found existing token, expired: \(existing.isExpired), expires: \(existing.expiresAt)")
-                if !existing.isExpired {
-                    return existing.accessToken
+    /// Resolves account credentials and returns the appropriate IMAP credential.
+    ///
+    /// For OAuth accounts: refreshes the token if needed, falls back to existing.
+    /// For app-password accounts: returns the password directly.
+    ///
+    /// This replaces the legacy `getAccessToken` which only handled OAuth.
+    private func resolveIMAPCredential(for account: Account) async throws -> IMAPCredential {
+        guard let credential = try await keychainManager.retrieveCredential(for: account.id) else {
+            NSLog("[Sync] No credentials found in keychain for \(account.id)")
+            throw SyncError.tokenRefreshFailed("No credentials found in keychain.")
+        }
+
+        switch credential {
+        case .password(let password):
+            NSLog("[Sync] Using app password for account \(account.id)")
+            return .plain(username: account.email, password: password)
+
+        case .oauth:
+            // Try to refresh the OAuth token first
+            do {
+                NSLog("[Sync] Refreshing token for account \(account.id)...")
+                let token = try await accountRepository.refreshToken(for: account.id)
+                NSLog("[Sync] Token refreshed successfully, expires: \(token.expiresAt)")
+                return .xoauth2(email: account.email, accessToken: token.accessToken)
+            } catch {
+                NSLog("[Sync] Token refresh failed: \(error), trying existing token...")
+                // If refresh fails, try using existing token from keychain
+                if let existing = try await keychainManager.retrieve(for: account.id) {
+                    NSLog("[Sync] Found existing token, expired: \(existing.isExpired), expires: \(existing.expiresAt)")
+                    if !existing.isExpired {
+                        return .xoauth2(email: account.email, accessToken: existing.accessToken)
+                    }
                 }
-            } else {
-                NSLog("[Sync] No token found in keychain")
+                throw SyncError.tokenRefreshFailed(error.localizedDescription)
             }
-            throw SyncError.tokenRefreshFailed(error.localizedDescription)
         }
     }
 
@@ -374,11 +394,13 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
         let provider = account.resolvedProvider
 
         for imapFolder in imapFolders {
-            guard ProviderFolderMapper.shouldSync(
+            let shouldSync = ProviderFolderMapper.shouldSync(
                 imapPath: imapFolder.imapPath,
                 attributes: imapFolder.attributes,
                 provider: provider
-            ) else { continue }
+            )
+            NSLog("[Sync] Folder '\(imapFolder.imapPath)' shouldSync=\(shouldSync) (provider=\(provider.rawValue), attrs=\(imapFolder.attributes))")
+            guard shouldSync else { continue }
 
             let folderType = ProviderFolderMapper.folderType(
                 imapPath: imapFolder.imapPath,
