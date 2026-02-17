@@ -103,7 +103,9 @@ struct VaultMailApp: App {
             aiProcessingQueue: deps.aiProcessingQueue,
             summarizeThread: deps.summarizeThread,
             smartReply: deps.smartReply,
-            searchUseCase: deps.searchUseCase
+            searchUseCase: deps.searchUseCase,
+            providerDiscovery: deps.providerDiscovery,
+            connectionTestUseCase: deps.connectionTestUseCase
         )
         .environment(deps.settingsStore)
         .modelContainer(deps.modelContainer)
@@ -144,6 +146,8 @@ private struct AppDependencies {
     let vectorEngine: VectorSearchEngine
     let searchIndexManager: SearchIndexManager
     let searchUseCase: SearchEmailsUseCase
+    let providerDiscovery: ProviderDiscovery
+    let connectionTestUseCase: ConnectionTestUseCaseProtocol
 
     init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
@@ -240,5 +244,9 @@ private struct AppDependencies {
         )
         summarizeThread = SummarizeThreadUseCase(aiRepository: aiRepository)
         smartReply = SmartReplyUseCase(aiRepository: aiRepository)
+
+        // Multi-provider support (MP-08, MP-09)
+        providerDiscovery = ProviderDiscovery()
+        connectionTestUseCase = ConnectionTestUseCase()
     }
 }

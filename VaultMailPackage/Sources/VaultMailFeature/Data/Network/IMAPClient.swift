@@ -28,6 +28,10 @@ public actor IMAPClient: IMAPClientProtocol {
     private var idleTask: Task<Void, Never>?
     private var idleHandler: (@Sendable () -> Void)?
 
+    /// Configurable IDLE refresh interval per provider (MP-13).
+    /// Defaults to 25 minutes (Gmail). Yahoo uses 4 minutes.
+    public nonisolated(unsafe) var idleRefreshInterval: TimeInterval = AppConstants.imapIdleRefreshInterval
+
     // MARK: - Init
 
     /// Creates an IMAP client with the specified timeout.
@@ -461,7 +465,7 @@ public actor IMAPClient: IMAPClientProtocol {
     /// than breaking the loop — the server may simply have had no new mail.
     /// Only genuine errors (connection drop, cancellation) exit the loop.
     private func runIDLELoop() async {
-        let refreshInterval = AppConstants.imapIdleRefreshInterval
+        let refreshInterval = idleRefreshInterval
         var lastIDLEStart = Date()
 
         while !Task.isCancelled {

@@ -18,19 +18,29 @@ public struct SettingsView: View {
     let manageAccounts: ManageAccountsUseCaseProtocol
     let modelManager: ModelManager
     var aiEngineResolver: AIEngineResolver?
+    var providerDiscovery: ProviderDiscovery?
+    var connectionTestUseCase: ConnectionTestUseCaseProtocol?
 
     @State private var accounts: [Account] = []
     @State private var isAddingAccount = false
+    @State private var showProviderSelection = false
     @State private var showClearCacheConfirmation = false
     @State private var showWipeConfirmation = false
     @State private var estimatedCacheSize: String = "…"
     @State private var errorMessage: String?
     @State private var notificationPermissionDenied = false
 
-    public init(manageAccounts: ManageAccountsUseCaseProtocol, modelManager: ModelManager = ModelManager(), aiEngineResolver: AIEngineResolver? = nil) {
+    /// Whether multi-provider support is available.
+    private var hasMultiProvider: Bool {
+        providerDiscovery != nil && connectionTestUseCase != nil
+    }
+
+    public init(manageAccounts: ManageAccountsUseCaseProtocol, modelManager: ModelManager = ModelManager(), aiEngineResolver: AIEngineResolver? = nil, providerDiscovery: ProviderDiscovery? = nil, connectionTestUseCase: ConnectionTestUseCaseProtocol? = nil) {
         self.manageAccounts = manageAccounts
         self.modelManager = modelManager
         self.aiEngineResolver = aiEngineResolver
+        self.providerDiscovery = providerDiscovery
+        self.connectionTestUseCase = connectionTestUseCase
     }
 
     public var body: some View {
@@ -64,6 +74,20 @@ public struct SettingsView: View {
         #endif
         .navigationTitle("Settings")
         .task { await loadAccounts() }
+        .sheet(isPresented: $showProviderSelection) {
+            if let discovery = providerDiscovery, let connTest = connectionTestUseCase {
+                ProviderSelectionView(
+                    manageAccounts: manageAccounts,
+                    connectionTestUseCase: connTest,
+                    providerDiscovery: discovery,
+                    onAccountAdded: { _ in
+                        showProviderSelection = false
+                        Task { await loadAccounts() }
+                    },
+                    onCancel: { showProviderSelection = false }
+                )
+            }
+        }
     }
 
     // MARK: - Sections
@@ -89,7 +113,11 @@ public struct SettingsView: View {
             }
 
             Button {
-                addAccount()
+                if hasMultiProvider {
+                    showProviderSelection = true
+                } else {
+                    addAccount()
+                }
             } label: {
                 Label("Add Account", systemImage: "plus.circle")
             }

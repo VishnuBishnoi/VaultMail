@@ -110,6 +110,11 @@ public final class IDLEMonitorUseCase: IDLEMonitorUseCaseProtocol {
                         credential: imapCredential
                     )
 
+                    // 2b. Set provider-specific IDLE refresh interval (MP-13)
+                    if let providerConfig = ProviderRegistry.provider(for: account.resolvedProvider) {
+                        client!.idleRefreshInterval = providerConfig.idleRefreshInterval
+                    }
+
                     // 3. Select the folder for IDLE
                     _ = try await client!.selectFolder(folderImapPath)
 

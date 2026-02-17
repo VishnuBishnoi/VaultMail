@@ -71,6 +71,10 @@ final class MockIMAPClient: IMAPClientProtocol, @unchecked Sendable {
     var startIDLEError: IMAPError?
     var stopIDLEError: IMAPError?
 
+    // MARK: - IDLE Configuration
+
+    var idleRefreshInterval: TimeInterval = 25 * 60
+
     // MARK: - IDLE Callback
 
     private(set) var idleHandler: (@Sendable () -> Void)?

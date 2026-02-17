@@ -218,12 +218,11 @@ public actor ProviderDiscovery {
     ///
     /// Falls back to an empty array on failure.
     private func resolveMXRecords(for domain: String) async throws -> [String] {
-        // Use host command for MX lookup (available on macOS/iOS simulator)
-        // In production, this would use dnssd or Network.framework
-        // For now, we use a simple heuristic: try common patterns
+        // Use host command for MX lookup (available on macOS only)
+        // On iOS (device and simulator), return empty — manual setup handles this case
+        #if os(macOS)
         return try await withCheckedThrowingContinuation { continuation in
             Task.detached {
-                #if targetEnvironment(simulator) || os(macOS)
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/host")
                 process.arguments = ["-t", "mx", domain]
@@ -254,13 +253,11 @@ public actor ProviderDiscovery {
                 } catch {
                     continuation.resume(returning: [])
                 }
-                #else
-                // On device, DNS resolution requires Network.framework
-                // For V1, return empty — manual setup handles this case
-                continuation.resume(returning: [])
-                #endif
             }
         }
+        #else
+        return []
+        #endif
     }
 
     // MARK: - Helpers

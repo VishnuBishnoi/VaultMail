@@ -275,10 +275,14 @@ public protocol IMAPClientProtocol: Sendable {
     /// Spec ref: FR-SYNC-08 (Lazy attachment download)
     func fetchBodyPart(uid: UInt32, section: String) async throws -> Data
 
+    /// Configurable IDLE refresh interval per provider (MP-13).
+    /// Default: 25 minutes. Yahoo uses 4 minutes.
+    var idleRefreshInterval: TimeInterval { get set }
+
     /// Starts IMAP IDLE on the currently selected folder.
     ///
     /// The handler is called when the server sends an EXISTS notification.
-    /// Must re-issue IDLE every 25 minutes (Gmail drops after ~29 min).
+    /// Re-issues IDLE based on `idleRefreshInterval`.
     ///
     /// Spec ref: FR-SYNC-03 (Real-time updates)
     func startIDLE(onNewMail: @Sendable @escaping () -> Void) async throws

@@ -37,6 +37,8 @@ struct ThreadListView: View {
     var summarizeThread: SummarizeThreadUseCaseProtocol?
     var smartReply: SmartReplyUseCaseProtocol?
     var searchUseCase: SearchEmailsUseCase?
+    var providerDiscovery: ProviderDiscovery?
+    var connectionTestUseCase: ConnectionTestUseCaseProtocol?
 
     @Environment(UndoSendManager.self) private var undoSendManager
 
@@ -345,7 +347,7 @@ struct ThreadListView: View {
     private func tabDestinationView(for destination: TabDestination) -> some View {
         switch destination {
         case .settings:
-            SettingsView(manageAccounts: manageAccounts, modelManager: modelManager, aiEngineResolver: aiEngineResolver)
+            SettingsView(manageAccounts: manageAccounts, modelManager: modelManager, aiEngineResolver: aiEngineResolver, providerDiscovery: providerDiscovery, connectionTestUseCase: connectionTestUseCase)
         case .aiChat:
             if let resolver = aiEngineResolver {
                 AIChatView(engineResolver: resolver)
