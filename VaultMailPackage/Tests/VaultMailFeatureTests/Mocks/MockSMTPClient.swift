@@ -28,12 +28,21 @@ actor MockSMTPClient: SMTPClientProtocol {
         shouldThrowOnSend = value
     }
 
-    func connect(host: String, port: Int, email: String, accessToken: String) async throws {
+    func connect(host: String, port: Int, security: ConnectionSecurity, credential: SMTPCredential) async throws {
         connectCallCount += 1
         if shouldThrowOnConnect {
             throw connectError
         }
         _isConnected = true
+    }
+
+    func connect(host: String, port: Int, email: String, accessToken: String) async throws {
+        try await connect(
+            host: host,
+            port: port,
+            security: .tls,
+            credential: .xoauth2(email: email, accessToken: accessToken)
+        )
     }
 
     func disconnect() async {

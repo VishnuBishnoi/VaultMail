@@ -33,7 +33,26 @@ public protocol SyncEmailsUseCaseProtocol {
 
 /// Abstraction for obtaining IMAP connections. ConnectionPool conforms
 /// in production; tests inject a mock that returns MockIMAPClient.
+///
+/// Supports two checkout signatures:
+/// - **Multi-provider** (`security:` + `credential:`): Used by code that has
+///   already resolved the account's provider config.
+/// - **Legacy** (`email:` + `accessToken:`): Backward-compatible convenience
+///   that defaults to TLS + XOAUTH2. Existing call sites can migrate gradually.
 public protocol ConnectionProviding: Sendable {
+
+    /// Checks out a connection with explicit security mode and credential.
+    ///
+    /// Spec ref: FR-MPROV-05 (STARTTLS), FR-MPROV-03 (SASL PLAIN)
+    func checkoutConnection(
+        accountId: String,
+        host: String,
+        port: Int,
+        security: ConnectionSecurity,
+        credential: IMAPCredential
+    ) async throws -> any IMAPClientProtocol
+
+    /// Checks out a connection using implicit TLS + XOAUTH2 (backward compat).
     func checkoutConnection(
         accountId: String,
         host: String,
@@ -45,8 +64,8 @@ public protocol ConnectionProviding: Sendable {
     func checkinConnection(_ client: any IMAPClientProtocol, accountId: String) async
 }
 
-/// Make ConnectionPool conform to ConnectionProviding.
-extension ConnectionPool: ConnectionProviding {
+/// Default implementation: legacy convenience delegates to multi-provider method.
+extension ConnectionProviding {
     public func checkoutConnection(
         accountId: String,
         host: String,
@@ -54,12 +73,31 @@ extension ConnectionPool: ConnectionProviding {
         email: String,
         accessToken: String
     ) async throws -> any IMAPClientProtocol {
+        try await checkoutConnection(
+            accountId: accountId,
+            host: host,
+            port: port,
+            security: .tls,
+            credential: .xoauth2(email: email, accessToken: accessToken)
+        )
+    }
+}
+
+/// Make ConnectionPool conform to ConnectionProviding.
+extension ConnectionPool: ConnectionProviding {
+    public func checkoutConnection(
+        accountId: String,
+        host: String,
+        port: Int,
+        security: ConnectionSecurity,
+        credential: IMAPCredential
+    ) async throws -> any IMAPClientProtocol {
         try await self.checkout(
             accountId: accountId,
             host: host,
             port: port,
-            email: email,
-            accessToken: accessToken
+            security: security,
+            credential: credential
         )
     }
 
@@ -333,16 +371,19 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
         account: Account
     ) async throws -> [Folder] {
         var syncableFolders: [Folder] = []
+        let provider = account.resolvedProvider
 
         for imapFolder in imapFolders {
-            guard GmailFolderMapper.shouldSync(
+            guard ProviderFolderMapper.shouldSync(
                 imapPath: imapFolder.imapPath,
-                attributes: imapFolder.attributes
+                attributes: imapFolder.attributes,
+                provider: provider
             ) else { continue }
 
-            let folderType = GmailFolderMapper.folderType(
+            let folderType = ProviderFolderMapper.folderType(
                 imapPath: imapFolder.imapPath,
-                attributes: imapFolder.attributes
+                attributes: imapFolder.attributes,
+                provider: provider
             )
 
             // Find existing or create new

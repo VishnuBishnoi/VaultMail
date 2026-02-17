@@ -59,17 +59,20 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
     private let accountRepository: AccountRepositoryProtocol
     private let keychainManager: KeychainManagerProtocol
     private let smtpClient: SMTPClientProtocol
+    private let connectionProvider: ConnectionProviding?
 
     public init(
         repository: EmailRepositoryProtocol,
         accountRepository: AccountRepositoryProtocol,
         keychainManager: KeychainManagerProtocol,
-        smtpClient: SMTPClientProtocol
+        smtpClient: SMTPClientProtocol,
+        connectionProvider: ConnectionProviding? = nil
     ) {
         self.repository = repository
         self.accountRepository = accountRepository
         self.keychainManager = keychainManager
         self.smtpClient = smtpClient
+        self.connectionProvider = connectionProvider
     }
 
     // MARK: - Build Prefill
@@ -266,26 +269,33 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
                 throw ComposerError.sendFailed("Account not found for email")
             }
 
-            // Get OAuth access token from Keychain
-            guard let token = try await keychainManager.retrieve(for: account.id) else {
+            // Resolve credential from Keychain (OAuth token or app password)
+            guard let credential = try await keychainManager.retrieveCredential(for: account.id) else {
                 email.sendState = SendState.failed.rawValue
                 try await repository.saveEmail(email)
-                throw ComposerError.sendFailed("No OAuth token found. Please re-authenticate.")
+                throw ComposerError.sendFailed("No credentials found. Please re-authenticate.")
             }
 
             let accessToken: String
-            if token.isExpired || token.isNearExpiry {
-                // Try to refresh the token
-                do {
-                    let refreshed = try await accountRepository.refreshToken(for: account.id)
-                    accessToken = refreshed.accessToken
-                } catch {
-                    email.sendState = SendState.failed.rawValue
-                    try await repository.saveEmail(email)
-                    throw ComposerError.sendFailed("Token refresh failed: \(error.localizedDescription)")
+            let appPassword: String?
+            switch credential {
+            case .oauth(let token):
+                appPassword = nil
+                if token.isExpired || token.isNearExpiry {
+                    do {
+                        let refreshed = try await accountRepository.refreshToken(for: account.id)
+                        accessToken = refreshed.accessToken
+                    } catch {
+                        email.sendState = SendState.failed.rawValue
+                        try await repository.saveEmail(email)
+                        throw ComposerError.sendFailed("Token refresh failed: \(error.localizedDescription)")
+                    }
+                } else {
+                    accessToken = token.accessToken
                 }
-            } else {
-                accessToken = token.accessToken
+            case .password(let pw):
+                accessToken = "" // Not used for PLAIN auth
+                appPassword = pw
             }
 
             // Decode recipient addresses
@@ -369,13 +379,20 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
                 throw error
             }
 
+            // Resolve SMTP credential based on account auth type
+            let smtpCredential: SMTPCredential = resolveSmtpCredential(
+                account: account,
+                accessToken: accessToken,
+                appPassword: appPassword
+            )
+
             // Connect to SMTP and send
             do {
                 try await smtpClient.connect(
                     host: account.smtpHost,
                     port: account.smtpPort,
-                    email: account.email,
-                    accessToken: accessToken
+                    security: account.resolvedSmtpSecurity,
+                    credential: smtpCredential
                 )
 
                 try await smtpClient.sendMessage(
@@ -429,6 +446,20 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
                 }
             }
 
+            // IMAP APPEND to Sent folder if required by provider (FR-MPROV-12).
+            // Gmail auto-copies sent messages; Yahoo/iCloud/Outlook need explicit APPEND.
+            let providerConfig = ProviderRegistry.provider(for: account.resolvedProvider)
+            if providerConfig?.requiresSentAppend ?? true,
+               let provider = connectionProvider {
+                await appendToSentFolder(
+                    account: account,
+                    messageData: messageData,
+                    accessToken: accessToken,
+                    appPassword: appPassword,
+                    connectionProvider: provider
+                )
+            }
+
             // Update thread
             if let thread = email.thread {
                 thread.latestDate = email.dateSent
@@ -465,6 +496,78 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
             }
         } catch {
             NSLog("[ComposeEmail] Failed to recover stuck emails: \(error)")
+        }
+    }
+
+    // MARK: - Provider-Aware Helpers
+
+    /// Resolves the SMTP credential from account settings and retrieved credentials.
+    private func resolveSmtpCredential(
+        account: Account,
+        accessToken: String,
+        appPassword: String?
+    ) -> SMTPCredential {
+        if let pw = appPassword {
+            return .plain(username: account.email, password: pw)
+        }
+        return .xoauth2(email: account.email, accessToken: accessToken)
+    }
+
+    /// Appends sent message to the Sent folder via IMAP (for providers that need it).
+    ///
+    /// Gmail auto-copies sent messages, so this is a no-op for Gmail.
+    /// Yahoo, iCloud, Outlook, and custom providers need this explicit APPEND.
+    /// Errors are logged but not thrown (best-effort, like thread actions).
+    private func appendToSentFolder(
+        account: Account,
+        messageData: Data,
+        accessToken: String,
+        appPassword: String?,
+        connectionProvider: ConnectionProviding
+    ) async {
+        do {
+            // Resolve IMAP credential
+            let imapCredential: IMAPCredential
+            if let pw = appPassword {
+                imapCredential = .plain(username: account.email, password: pw)
+            } else {
+                imapCredential = .xoauth2(email: account.email, accessToken: accessToken)
+            }
+
+            let client = try await connectionProvider.checkoutConnection(
+                accountId: account.id,
+                host: account.imapHost,
+                port: account.imapPort,
+                security: account.resolvedImapSecurity,
+                credential: imapCredential
+            )
+            defer { Task { await connectionProvider.checkinConnection(client, accountId: account.id) } }
+
+            // Find the Sent folder's IMAP path
+            let folders = try await client.listFolders()
+            let provider = account.resolvedProvider
+            let sentPath = folders.first { folder in
+                let type = ProviderFolderMapper.folderType(
+                    imapPath: folder.imapPath,
+                    attributes: folder.attributes,
+                    provider: provider
+                )
+                return type == .sent
+            }?.imapPath
+
+            guard let sentPath else {
+                NSLog("[ComposeSend] No Sent folder found for IMAP APPEND — skipping")
+                return
+            }
+
+            try await client.appendMessage(
+                to: sentPath,
+                messageData: messageData,
+                flags: ["\\Seen"]
+            )
+            NSLog("[ComposeSend] IMAP APPEND to \(sentPath) succeeded")
+        } catch {
+            NSLog("[ComposeSend] IMAP APPEND to Sent failed (best-effort): \(error)")
         }
     }
 

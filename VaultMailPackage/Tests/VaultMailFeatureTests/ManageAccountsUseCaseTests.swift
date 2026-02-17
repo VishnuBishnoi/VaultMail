@@ -245,8 +245,8 @@ struct ManageAccountsUseCaseTests {
             accountId: String,
             host: String,
             port: Int,
-            email: String,
-            accessToken: String
+            security: ConnectionSecurity,
+            credential: IMAPCredential
         ) async throws -> any IMAPClientProtocol {
             throw NSError(domain: "IMAP", code: 1, userInfo: [NSLocalizedDescriptionKey: "Connection refused"])
         }

@@ -46,23 +46,37 @@ public actor IMAPClient: IMAPClientProtocol {
         }
     }
 
-    /// Connects to the IMAP server using TLS and authenticates with XOAUTH2.
+    /// Connects to the IMAP server and authenticates using the specified
+    /// security mode and credential.
     ///
-    /// Per AC-F-05:
-    /// - Connection MUST use TLS (port 993)
-    /// - XOAUTH2 authentication MUST succeed with valid credentials
+    /// Routes to the correct session connect + authenticate methods based
+    /// on the credential type (XOAUTH2 or PLAIN).
     ///
     /// Per FR-SYNC-09:
     /// - Connection timeout: 30 seconds
     /// - Retry with exponential backoff: 5s, 15s, 45s
-    public func connect(host: String, port: Int, email: String, accessToken: String) async throws {
+    ///
+    /// Spec ref: FR-MPROV-02, FR-MPROV-03, FR-MPROV-05
+    public func connect(
+        host: String,
+        port: Int,
+        security: ConnectionSecurity,
+        credential: IMAPCredential
+    ) async throws {
         var lastError: Error?
 
         // Retry logic per FR-SYNC-09: 3 retries with exponential backoff (5s, 15s, 45s)
         for attempt in 0...AppConstants.imapMaxRetries {
             do {
-                try await session.connect(host: host, port: port)
-                try await session.authenticateXOAUTH2(email: email, accessToken: accessToken)
+                try await session.connect(host: host, port: port, security: security)
+
+                switch credential {
+                case .xoauth2(let email, let accessToken):
+                    try await session.authenticateXOAUTH2(email: email, accessToken: accessToken)
+                case .plain(let username, let password):
+                    try await session.authenticatePLAIN(username: username, password: password)
+                }
+
                 _isConnected = true
                 return
             } catch let error as IMAPError {
@@ -91,6 +105,18 @@ public actor IMAPClient: IMAPClientProtocol {
         }
 
         throw lastError ?? IMAPError.maxRetriesExhausted
+    }
+
+    /// Connects using implicit TLS and XOAUTH2 (backward-compatible convenience).
+    ///
+    /// Equivalent to `connect(host:port:security:.tls, credential:.xoauth2(...))`.
+    public func connect(host: String, port: Int, email: String, accessToken: String) async throws {
+        try await connect(
+            host: host,
+            port: port,
+            security: .tls,
+            credential: .xoauth2(email: email, accessToken: accessToken)
+        )
     }
 
     /// Disconnects from the IMAP server gracefully.

@@ -23,8 +23,8 @@ struct IDLEMonitorUseCaseTests {
             accountId: String,
             host: String,
             port: Int,
-            email: String,
-            accessToken: String
+            security: ConnectionSecurity,
+            credential: IMAPCredential
         ) async throws -> any IMAPClientProtocol {
             checkoutCount += 1
             if shouldThrowOnCheckout {
@@ -138,10 +138,16 @@ struct IDLEMonitorUseCaseTests {
 
         let stream = sut.monitor(accountId: "nonexistent", folderImapPath: "INBOX")
 
-        var events: [IDLEEvent] = []
-        for await event in stream {
-            events.append(event)
+        let consumeTask = Task { @MainActor in
+            var collected: [IDLEEvent] = []
+            for await event in stream {
+                collected.append(event)
+                if collected.count >= 1 { break }
+            }
+            return collected
         }
+        let events = await consumeTask.value
+        consumeTask.cancel()
 
         #expect(events == [.disconnected])
         #expect(mockIMAPClient.startIDLECallCount == 0)
@@ -162,10 +168,16 @@ struct IDLEMonitorUseCaseTests {
 
         let stream = sut.monitor(accountId: account.id, folderImapPath: "INBOX")
 
-        var events: [IDLEEvent] = []
-        for await event in stream {
-            events.append(event)
+        let consumeTask = Task { @MainActor in
+            var collected: [IDLEEvent] = []
+            for await event in stream {
+                collected.append(event)
+                if collected.count >= 1 { break }
+            }
+            return collected
         }
+        let events = await consumeTask.value
+        consumeTask.cancel()
 
         #expect(events == [.disconnected])
     }
@@ -186,10 +198,16 @@ struct IDLEMonitorUseCaseTests {
 
         let stream = sut.monitor(accountId: account.id, folderImapPath: "INBOX")
 
-        var events: [IDLEEvent] = []
-        for await event in stream {
-            events.append(event)
+        let consumeTask = Task { @MainActor in
+            var collected: [IDLEEvent] = []
+            for await event in stream {
+                collected.append(event)
+                if collected.count >= 1 { break }
+            }
+            return collected
         }
+        let events = await consumeTask.value
+        consumeTask.cancel()
 
         #expect(events == [.disconnected])
     }
@@ -211,10 +229,16 @@ struct IDLEMonitorUseCaseTests {
 
         let stream = sut.monitor(accountId: account.id, folderImapPath: "INBOX")
 
-        var events: [IDLEEvent] = []
-        for await event in stream {
-            events.append(event)
+        let consumeTask = Task { @MainActor in
+            var collected: [IDLEEvent] = []
+            for await event in stream {
+                collected.append(event)
+                if collected.count >= 1 { break }
+            }
+            return collected
         }
+        let events = await consumeTask.value
+        consumeTask.cancel()
 
         #expect(events == [.disconnected])
         #expect(provider.checkoutCount == 1)
@@ -283,10 +307,16 @@ struct IDLEMonitorUseCaseTests {
 
         let stream = sut.monitor(accountId: account.id, folderImapPath: "INBOX")
 
-        var events: [IDLEEvent] = []
-        for await event in stream {
-            events.append(event)
+        let consumeTask = Task { @MainActor in
+            var collected: [IDLEEvent] = []
+            for await event in stream {
+                collected.append(event)
+                if collected.count >= 1 { break }
+            }
+            return collected
         }
+        let events = await consumeTask.value
+        consumeTask.cancel()
 
         #expect(events == [.disconnected])
         #expect(provider.checkoutCount == 1)

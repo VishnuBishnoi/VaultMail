@@ -66,8 +66,8 @@ struct ConnectionPoolTests {
             accountId: "acct-1",
             host: "imap.gmail.com",
             port: 993,
-            email: "user@gmail.com",
-            accessToken: "token"
+            security: .tls,
+            credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
         )
 
         // Pool now has 1 connection, checked out
@@ -90,8 +90,8 @@ struct ConnectionPoolTests {
                 accountId: "acct-1",
                 host: "imap.gmail.com",
                 port: 993,
-                email: "user@gmail.com",
-                accessToken: "token"
+                security: .tls,
+                credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
             )
             clients.append(client)
         }
@@ -117,8 +117,8 @@ struct ConnectionPoolTests {
             accountId: "acct-1",
             host: "imap.gmail.com",
             port: 993,
-            email: "user@gmail.com",
-            accessToken: "token"
+            security: .tls,
+            credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
         )
 
         await pool.checkin(client1, accountId: "acct-1")
@@ -180,8 +180,8 @@ struct ConnectionPoolTests {
             accountId: "acct-1",
             host: "imap.gmail.com",
             port: 993,
-            email: "user@gmail.com",
-            accessToken: "token"
+            security: .tls,
+            credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
         )
 
         // Second checkout should queue (not throw)
@@ -190,8 +190,8 @@ struct ConnectionPoolTests {
                 accountId: "acct-1",
                 host: "imap.gmail.com",
                 port: 993,
-                email: "user@gmail.com",
-                accessToken: "token"
+                security: .tls,
+                credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
             )
         }
 
@@ -226,8 +226,8 @@ struct ConnectionPoolTests {
             accountId: "acct-1",
             host: "imap.gmail.com",
             port: 993,
-            email: "user@gmail.com",
-            accessToken: "token"
+            security: .tls,
+            credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
         )
 
         // Queue two waiters
@@ -236,8 +236,8 @@ struct ConnectionPoolTests {
                 accountId: "acct-1",
                 host: "imap.gmail.com",
                 port: 993,
-                email: "user@gmail.com",
-                accessToken: "token"
+                security: .tls,
+                credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
             )
         }
 
@@ -249,8 +249,8 @@ struct ConnectionPoolTests {
                 accountId: "acct-1",
                 host: "imap.gmail.com",
                 port: 993,
-                email: "user@gmail.com",
-                accessToken: "token"
+                security: .tls,
+                credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
             )
         }
 
@@ -282,8 +282,8 @@ struct ConnectionPoolTests {
             accountId: "acct-1",
             host: "imap.gmail.com",
             port: 993,
-            email: "user@gmail.com",
-            accessToken: "token"
+            security: .tls,
+            credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
         )
 
         // Second checkout should queue and then timeout
@@ -292,8 +292,8 @@ struct ConnectionPoolTests {
                 accountId: "acct-1",
                 host: "imap.gmail.com",
                 port: 993,
-                email: "user@gmail.com",
-                accessToken: "token"
+                security: .tls,
+                credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
             )
         }
 
@@ -313,8 +313,8 @@ struct ConnectionPoolTests {
                 accountId: "acct-1",
                 host: "imap.gmail.com",
                 port: 993,
-                email: "user@gmail.com",
-                accessToken: "token"
+                security: .tls,
+                credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
             )
         }
     }
@@ -329,8 +329,8 @@ struct ConnectionPoolTests {
             accountId: "acct-1",
             host: "imap.gmail.com",
             port: 993,
-            email: "user@gmail.com",
-            accessToken: "token"
+            security: .tls,
+            credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
         )
 
         // Queue a waiter
@@ -339,8 +339,8 @@ struct ConnectionPoolTests {
                 accountId: "acct-1",
                 host: "imap.gmail.com",
                 port: 993,
-                email: "user@gmail.com",
-                accessToken: "token"
+                security: .tls,
+                credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
             )
         }
 
@@ -370,8 +370,8 @@ struct ConnectionPoolTests {
             accountId: "acct-1",
             host: "imap.gmail.com",
             port: 993,
-            email: "user@gmail.com",
-            accessToken: "token"
+            security: .tls,
+            credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
         )
 
         // Exhaust account-2
@@ -379,8 +379,8 @@ struct ConnectionPoolTests {
             accountId: "acct-2",
             host: "imap.gmail.com",
             port: 993,
-            email: "other@gmail.com",
-            accessToken: "token2"
+            security: .tls,
+            credential: .xoauth2(email: "other@gmail.com", accessToken: "token2")
         )
 
         // Queue waiters for both accounts
@@ -389,8 +389,8 @@ struct ConnectionPoolTests {
                 accountId: "acct-1",
                 host: "imap.gmail.com",
                 port: 993,
-                email: "user@gmail.com",
-                accessToken: "token"
+                security: .tls,
+                credential: .xoauth2(email: "user@gmail.com", accessToken: "token")
             )
         }
         let waiter2 = Task<IMAPClient, Error> {
@@ -398,8 +398,8 @@ struct ConnectionPoolTests {
                 accountId: "acct-2",
                 host: "imap.gmail.com",
                 port: 993,
-                email: "other@gmail.com",
-                accessToken: "token2"
+                security: .tls,
+                credential: .xoauth2(email: "other@gmail.com", accessToken: "token2")
             )
         }
 
@@ -493,8 +493,8 @@ struct ConnectionPoolTests {
             accountId: "acct-A",
             host: "imap.gmail.com",
             port: 993,
-            email: "a@gmail.com",
-            accessToken: "tokenA"
+            security: .tls,
+            credential: .xoauth2(email: "a@gmail.com", accessToken: "tokenA")
         )
 
         let countA = await pool.connectionCount(for: "acct-A")
@@ -514,15 +514,15 @@ struct ConnectionPoolTests {
             accountId: "acct-A",
             host: "imap.gmail.com",
             port: 993,
-            email: "a@gmail.com",
-            accessToken: "tokenA"
+            security: .tls,
+            credential: .xoauth2(email: "a@gmail.com", accessToken: "tokenA")
         )
         let clientB = try await pool.checkout(
             accountId: "acct-B",
             host: "imap.gmail.com",
             port: 993,
-            email: "b@gmail.com",
-            accessToken: "tokenB"
+            security: .tls,
+            credential: .xoauth2(email: "b@gmail.com", accessToken: "tokenB")
         )
 
         // Disconnect account A only

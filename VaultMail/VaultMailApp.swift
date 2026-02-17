@@ -189,7 +189,8 @@ private struct AppDependencies {
             repository: emailRepo,
             accountRepository: accountRepo,
             keychainManager: keychainManager,
-            smtpClient: SMTPClient()
+            smtpClient: SMTPClient(),
+            connectionProvider: connectionPool
         )
         queryContacts = QueryContactsUseCase(repository: emailRepo)
 

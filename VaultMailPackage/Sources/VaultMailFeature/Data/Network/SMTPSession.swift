@@ -343,6 +343,42 @@ actor SMTPSession {
         throw SMTPError.authenticationFailed("Code \(response.code): \(response.text)")
     }
 
+    // MARK: - SASL PLAIN Authentication (FR-MPROV-03)
+
+    /// Authenticates using SASL PLAIN mechanism over SMTP.
+    ///
+    /// Used by providers that require app passwords (Yahoo, iCloud, custom).
+    /// Sends `AUTH PLAIN <base64>` where the base64 payload is:
+    /// `\0<username>\0<password>` per RFC 4616.
+    ///
+    /// Spec ref: FR-MPROV-03 (SASL PLAIN authentication)
+    ///
+    /// - Parameters:
+    ///   - username: User's email address (or login username)
+    ///   - password: App-specific password
+    /// - Throws: `SMTPError.authenticationFailed`
+    func authenticatePLAIN(username: String, password: String) async throws {
+        // Build SASL PLAIN string: "\0username\0password" → base64
+        let authString = "\u{00}\(username)\u{00}\(password)"
+        let base64Auth = Data(authString.utf8).base64EncodedString()
+
+        let response = try await sendCommand("AUTH PLAIN \(base64Auth)")
+
+        if response.code == 235 {
+            return // Authentication successful
+        }
+
+        // Auth failed — some servers return 535 directly
+        if response.code == 334 {
+            // Server wants a continuation — send empty line to cancel
+            try await sendRaw("\r\n")
+            let errorResponse = try await readResponse()
+            throw SMTPError.authenticationFailed(errorResponse.text)
+        }
+
+        throw SMTPError.authenticationFailed("Code \(response.code): \(response.text)")
+    }
+
     // MARK: - Send Message
 
     /// Sends a complete SMTP message transaction.

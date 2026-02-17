@@ -359,6 +359,44 @@ actor IMAPSession {
         }
     }
 
+    // MARK: - SASL PLAIN Authentication (FR-MPROV-03)
+
+    /// Authenticates using SASL PLAIN mechanism.
+    ///
+    /// Used by providers that require app passwords (Yahoo, iCloud, custom).
+    /// Sends `LOGIN username password` command per RFC 3501 §6.2.3.
+    ///
+    /// LOGIN is preferred over `AUTHENTICATE PLAIN` because:
+    /// - Simpler wire format (no base64 encoding needed)
+    /// - Widely supported across all IMAP servers
+    /// - Functionally equivalent for password-based auth
+    ///
+    /// Spec ref: FR-MPROV-03 (SASL PLAIN authentication)
+    func authenticatePLAIN(username: String, password: String) async throws {
+        tagCounter += 1
+        let tag = makeTag()
+
+        // Sanitize credentials to prevent command injection.
+        // IMAP LOGIN quotes both arguments — we escape any embedded
+        // quotes and strip CRLF to prevent breakout.
+        let safeUser = username.imapQuoteSanitized
+        let safePass = password.imapQuoteSanitized
+        try await sendRaw("\(tag) LOGIN \"\(safeUser)\" \"\(safePass)\"")
+
+        while true {
+            let line = try await readLine()
+
+            if line.hasPrefix(tag + " OK") {
+                return // Auth succeeded
+            } else if line.hasPrefix(tag + " NO") || line.hasPrefix(tag + " BAD") {
+                throw IMAPError.authenticationFailed(
+                    String(line.dropFirst(tag.count + 1))
+                )
+            }
+            // Ignore untagged responses during auth
+        }
+    }
+
     // MARK: - Command Execution
 
     /// Executes a tagged IMAP command and returns all untagged responses.

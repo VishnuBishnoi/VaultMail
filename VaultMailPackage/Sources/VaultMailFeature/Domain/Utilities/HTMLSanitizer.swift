@@ -13,6 +13,7 @@ import Foundation
 final class SanitizationCache: @unchecked Sendable {
     static let shared = SanitizationCache()
 
+    private let lock = NSLock()
     private var storage: [Int: String] = [:]
     private var insertionOrder: [Int] = []
     private let maxSize = 32
@@ -20,24 +21,28 @@ final class SanitizationCache: @unchecked Sendable {
     private init() {}
 
     func get(_ key: Int) -> String? {
-        storage[key]
+        lock.withLock { storage[key] }
     }
 
     func store(_ html: String, forKey key: Int) {
-        if storage[key] == nil {
-            insertionOrder.append(key)
-        }
-        storage[key] = html
+        lock.withLock {
+            if storage[key] == nil {
+                insertionOrder.append(key)
+            }
+            storage[key] = html
 
-        while insertionOrder.count > maxSize {
-            let evictedKey = insertionOrder.removeFirst()
-            storage.removeValue(forKey: evictedKey)
+            while insertionOrder.count > maxSize {
+                let evictedKey = insertionOrder.removeFirst()
+                storage.removeValue(forKey: evictedKey)
+            }
         }
     }
 
     func clear() {
-        storage.removeAll()
-        insertionOrder.removeAll()
+        lock.withLock {
+            storage.removeAll()
+            insertionOrder.removeAll()
+        }
     }
 }
 

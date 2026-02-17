@@ -87,19 +87,27 @@ public final class IDLEMonitorUseCase: IDLEMonitorUseCaseProtocol {
                     }
                     resolvedAccountId = account.id
 
-                    guard let token = try await keychain.retrieve(for: account.id) else {
+                    guard let credential = try await keychain.retrieveCredential(for: account.id) else {
                         NSLog("[IDLE] No credentials found for account \(accountId)")
                         continuation.yield(.disconnected)
                         return
                     }
 
-                    // 2. Checkout a dedicated IDLE connection
+                    // 2. Resolve IMAP credential and checkout a dedicated IDLE connection
+                    let imapCredential: IMAPCredential
+                    switch credential {
+                    case .oauth(let token):
+                        imapCredential = .xoauth2(email: account.email, accessToken: token.accessToken)
+                    case .password(let password):
+                        imapCredential = .plain(username: account.email, password: password)
+                    }
+
                     client = try await provider.checkoutConnection(
                         accountId: account.id,
                         host: account.imapHost,
                         port: account.imapPort,
-                        email: account.email,
-                        accessToken: token.accessToken
+                        security: account.resolvedImapSecurity,
+                        credential: imapCredential
                     )
 
                     // 3. Select the folder for IDLE

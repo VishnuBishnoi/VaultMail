@@ -10,7 +10,11 @@ import Foundation
 /// becomes available — operations are never rejected simply because
 /// all connections are in use (FR-SYNC-09 spec requirement).
 ///
-/// Spec ref: FR-SYNC-09 (Connection Management)
+/// Supports both implicit TLS and STARTTLS connections, as well as
+/// XOAUTH2 and SASL PLAIN authentication, via `ConnectionSecurity`
+/// and `IMAPCredential` parameters.
+///
+/// Spec ref: FR-SYNC-09 (Connection Management), FR-MPROV-05 (STARTTLS)
 public actor ConnectionPool {
 
     // MARK: - Types
@@ -28,13 +32,17 @@ public actor ConnectionPool {
     }
 
     /// Factory closure that creates and connects an `IMAPClient`.
+    ///
+    /// Accepts security mode and credential for multi-provider support.
     /// Injected for testability — tests can provide a mock factory
     /// that avoids real network connections.
+    ///
+    /// Spec ref: FR-MPROV-03, FR-MPROV-05
     public typealias ConnectionFactory = @Sendable (
         _ host: String,
         _ port: Int,
-        _ email: String,
-        _ accessToken: String
+        _ security: ConnectionSecurity,
+        _ credential: IMAPCredential
     ) async throws -> IMAPClient
 
     // MARK: - Properties
@@ -47,6 +55,12 @@ public actor ConnectionPool {
 
     /// Maximum connections per account (FR-SYNC-09: 5 for Gmail).
     private let maxConnectionsPerAccount: Int
+
+    /// Per-account connection limit overrides (FR-MPROV-13).
+    ///
+    /// Keys are account IDs. If an account is not in this map, the
+    /// default `maxConnectionsPerAccount` is used.
+    private var accountConnectionLimits: [String: Int] = [:]
 
     /// How long a caller will wait for a connection before timing out.
     private let waitTimeout: TimeInterval
@@ -70,11 +84,35 @@ public actor ConnectionPool {
     ) {
         self.maxConnectionsPerAccount = maxConnectionsPerAccount
         self.waitTimeout = waitTimeout
-        self.connectionFactory = connectionFactory ?? { host, port, email, accessToken in
+        self.connectionFactory = connectionFactory ?? { host, port, security, credential in
             let client = IMAPClient()
-            try await client.connect(host: host, port: port, email: email, accessToken: accessToken)
+            try await client.connect(
+                host: host,
+                port: port,
+                security: security,
+                credential: credential
+            )
             return client
         }
+    }
+
+    // MARK: - Per-Account Limits (FR-MPROV-13)
+
+    /// Sets the connection limit for a specific account.
+    ///
+    /// Call this after account creation using the provider's
+    /// `maxConnectionsPerAccount` value.
+    ///
+    /// - Parameters:
+    ///   - limit: Maximum concurrent connections for this account.
+    ///   - accountId: The account to configure.
+    public func setConnectionLimit(_ limit: Int, for accountId: String) {
+        accountConnectionLimits[accountId] = limit
+    }
+
+    /// Returns the effective connection limit for an account.
+    private func effectiveConnectionLimit(for accountId: String) -> Int {
+        accountConnectionLimits[accountId] ?? maxConnectionsPerAccount
     }
 
     // MARK: - Checkout / Return
@@ -91,8 +129,8 @@ public actor ConnectionPool {
     ///   - accountId: Unique account identifier
     ///   - host: IMAP server hostname
     ///   - port: IMAP server port
-    ///   - email: User's email address
-    ///   - accessToken: OAuth access token
+    ///   - security: Connection security mode (TLS, STARTTLS)
+    ///   - credential: Authentication credential (XOAUTH2, PLAIN)
     /// - Returns: A connected `IMAPClient` ready for use
     /// - Throws: `IMAPError.timeout` if no connection becomes available
     ///   within `waitTimeout` seconds.
@@ -100,9 +138,11 @@ public actor ConnectionPool {
         accountId: String,
         host: String,
         port: Int,
-        email: String,
-        accessToken: String
+        security: ConnectionSecurity,
+        credential: IMAPCredential
     ) async throws -> IMAPClient {
+        let limit = effectiveConnectionLimit(for: accountId)
+
         // Loop until we find/create a connection or queue (avoids recursive actor re-entrance)
         while true {
             var entries = pools[accountId] ?? []
@@ -134,8 +174,8 @@ public actor ConnectionPool {
             }
 
             // 2. Create a new connection if under the limit
-            if entries.count < maxConnectionsPerAccount {
-                let client = try await connectionFactory(host, port, email, accessToken)
+            if entries.count < limit {
+                let client = try await connectionFactory(host, port, security, credential)
                 entries.append(PoolEntry(client: client, isCheckedOut: true))
                 pools[accountId] = entries
                 return client

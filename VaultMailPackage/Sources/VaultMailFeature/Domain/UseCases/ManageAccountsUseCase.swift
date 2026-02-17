@@ -18,6 +18,18 @@ public protocol ManageAccountsUseCaseProtocol {
     /// Spec ref: FR-ACCT-01, FR-OB-01 step 2
     func addAccountViaOAuth() async throws -> Account
 
+    /// Add an account using an app password (Yahoo, iCloud, custom IMAP).
+    ///
+    /// Creates the account with provider config, stores the password in Keychain,
+    /// persists the account, and validates IMAP + SMTP connectivity.
+    ///
+    /// Spec ref: FR-MPROV-06
+    func addAccountViaAppPassword(
+        email: String,
+        password: String,
+        providerConfig: ProviderConfiguration
+    ) async throws -> Account
+
     /// Remove an account and all associated data (cascade delete).
     /// Returns `true` if no accounts remain after removal (signals onboarding re-entry).
     func removeAccount(id: String) async throws -> Bool
@@ -124,6 +136,58 @@ public final class ManageAccountsUseCase: ManageAccountsUseCaseProtocol {
                 // Roll back: remove account from SwiftData and Keychain
                 try? await repository.removeAccount(id: account.id)
                 try? await keychainManager.delete(for: account.id)
+                throw AccountError.imapValidationFailed(error.localizedDescription)
+            }
+        }
+
+        return account
+    }
+
+    public func addAccountViaAppPassword(
+        email: String,
+        password: String,
+        providerConfig: ProviderConfiguration
+    ) async throws -> Account {
+        // Step 1: Create account from provider config
+        let displayName = email.components(separatedBy: "@").first ?? email
+        let account = Account(
+            email: email,
+            displayName: displayName,
+            providerConfig: providerConfig
+        )
+
+        // Step 2: Store password in Keychain (never in SwiftData — AC-SEC-02)
+        try await keychainManager.storeCredential(.password(password), for: account.id)
+
+        // Step 3: Persist account in SwiftData
+        do {
+            try await repository.addAccount(account)
+        } catch {
+            // Roll back Keychain on persistence failure
+            try? await keychainManager.deleteCredential(for: account.id)
+            throw error
+        }
+
+        // Step 4: Validate IMAP connectivity using PLAIN auth.
+        // If validation fails, roll back both Keychain and SwiftData.
+        if let provider = connectionProvider {
+            do {
+                let credential: IMAPCredential = .plain(username: email, password: password)
+                let client = try await provider.checkoutConnection(
+                    accountId: account.id,
+                    host: account.imapHost,
+                    port: account.imapPort,
+                    security: account.resolvedImapSecurity,
+                    credential: credential
+                )
+                // Connection succeeded — return it to pool immediately
+                await provider.checkinConnection(client, accountId: account.id)
+                NSLog("[IMAP] App password validation succeeded for \(account.email)")
+            } catch {
+                NSLog("[IMAP] App password validation FAILED for \(account.email): \(error)")
+                // Roll back: remove account from SwiftData and Keychain
+                try? await repository.removeAccount(id: account.id)
+                try? await keychainManager.deleteCredential(for: account.id)
                 throw AccountError.imapValidationFailed(error.localizedDescription)
             }
         }

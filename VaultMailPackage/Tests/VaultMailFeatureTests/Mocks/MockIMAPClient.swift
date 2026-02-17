@@ -36,6 +36,8 @@ final class MockIMAPClient: IMAPClientProtocol, @unchecked Sendable {
     private(set) var lastConnectPort: Int?
     private(set) var lastConnectEmail: String?
     private(set) var lastConnectAccessToken: String?
+    private(set) var lastConnectSecurity: ConnectionSecurity?
+    private(set) var lastConnectCredential: IMAPCredential?
     private(set) var lastSelectedPath: String?
     private(set) var lastSearchDate: Date?
     private(set) var lastFetchedUIDs: [UInt32]?
@@ -84,17 +86,35 @@ final class MockIMAPClient: IMAPClientProtocol, @unchecked Sendable {
         get async { connected }
     }
 
-    func connect(host: String, port: Int, email: String, accessToken: String) async throws {
+    func connect(host: String, port: Int, security: ConnectionSecurity, credential: IMAPCredential) async throws {
         connectCallCount += 1
         lastConnectHost = host
         lastConnectPort = port
-        lastConnectEmail = email
-        lastConnectAccessToken = accessToken
+        lastConnectSecurity = security
+        lastConnectCredential = credential
+
+        // Also populate legacy fields for backward-compat assertions
+        switch credential {
+        case .xoauth2(let email, let accessToken):
+            lastConnectEmail = email
+            lastConnectAccessToken = accessToken
+        case .plain(let username, _):
+            lastConnectEmail = username
+        }
 
         if let error = connectError {
             throw error
         }
         connected = true
+    }
+
+    func connect(host: String, port: Int, email: String, accessToken: String) async throws {
+        try await connect(
+            host: host,
+            port: port,
+            security: .tls,
+            credential: .xoauth2(email: email, accessToken: accessToken)
+        )
     }
 
     func disconnect() async throws {
