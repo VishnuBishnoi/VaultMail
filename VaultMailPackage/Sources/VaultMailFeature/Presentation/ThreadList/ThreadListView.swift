@@ -400,8 +400,10 @@ struct ThreadListView: View {
                     }
                 } else {
                     selectedAccount = nil
-                    selectedFolder = nil
                     selectedCategory = nil
+                    folders = buildUnifiedFolders()
+                    let inboxType = FolderType.inbox.rawValue
+                    selectedFolder = folders.first(where: { $0.folderType == inboxType }) ?? folders.first
                     Task { await reloadThreads() }
                 }
             }
@@ -962,6 +964,11 @@ struct ThreadListView: View {
                 }
             }
 
+            // Rebuild unified folders if in "All Accounts" mode
+            if selectedAccount == nil {
+                folders = buildUnifiedFolders()
+            }
+
             // If a brand-new account was added, kick off background sync for it
             let addedIds = newIds.subtracting(oldIds)
             for addedId in addedIds {
@@ -1135,6 +1142,26 @@ struct ThreadListView: View {
         } catch {
             viewState = .error(error.localizedDescription)
         }
+    }
+
+    /// Build a deduplicated folder list for unified "All Accounts" mode.
+    ///
+    /// Collects folders from every account and keeps the first occurrence of
+    /// each `folderType`, so the user sees one "Inbox", one "Sent", etc.
+    /// In unified mode the folder selection is cosmetic (thread loading uses
+    /// `fetchUnifiedThreads` regardless), but it gives the user a consistent
+    /// folder menu rather than stale folders from the last single-account view.
+    private func buildUnifiedFolders() -> [Folder] {
+        var seenTypes = Set<String>()
+        var result: [Folder] = []
+
+        for folder in accounts.flatMap(\.folders) {
+            if seenTypes.insert(folder.folderType).inserted {
+                result.append(folder)
+            }
+        }
+
+        return result
     }
 
     // MARK: - Thread Actions
