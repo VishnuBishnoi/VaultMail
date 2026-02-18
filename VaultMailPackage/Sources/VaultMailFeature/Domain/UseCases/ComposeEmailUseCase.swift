@@ -481,13 +481,44 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
                 )
             }
 
-            // Update thread
-            if let thread = email.thread {
-                thread.latestDate = email.dateSent
-                try await repository.saveThread(thread)
-                NSLog("[ComposeSend] Thread \(thread.id) updated with latestDate")
+            // Update thread metadata (participants, snippet, latestDate)
+            let thread: VaultMailFeature.Thread?
+            if let t = email.thread {
+                thread = t
+            } else if let t = try await repository.getThread(id: email.threadId) {
+                email.thread = t
+                thread = t
             } else {
-                NSLog("[ComposeSend] WARNING: email.thread is nil, thread won't appear in folder view")
+                thread = nil
+            }
+
+            if let thread {
+                thread.latestDate = email.dateSent
+                thread.snippet = String(email.bodyPlain?.prefix(100) ?? "")
+                thread.subject = email.subject
+
+                // Build participants from recipients (for Sent folder display)
+                var participantSet: [String: Participant] = [:]
+                // Add sender (self)
+                if !email.fromAddress.isEmpty {
+                    participantSet[email.fromAddress.lowercased()] = Participant(
+                        name: email.fromName,
+                        email: email.fromAddress
+                    )
+                }
+                // Add To recipients
+                for addr in decodeAddresses(email.toAddresses) {
+                    let key = addr.lowercased()
+                    if participantSet[key] == nil {
+                        participantSet[key] = Participant(name: nil, email: addr)
+                    }
+                }
+                thread.participants = Participant.encode(Array(participantSet.values))
+
+                try await repository.saveThread(thread)
+                NSLog("[ComposeSend] Thread \(thread.id) updated with participants and latestDate")
+            } else {
+                NSLog("[ComposeSend] WARNING: no thread found for email \(email.id)")
             }
 
         } catch let error as ComposerError {

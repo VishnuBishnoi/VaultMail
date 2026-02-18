@@ -951,7 +951,13 @@ public struct MacOSMainView: View {
         case .sent(let emailId):
             let delay = settings.undoSendDelay.rawValue
             undoSendManager.startCountdown(emailId: emailId, delaySeconds: delay) { emailId in
-                try? await composeEmail.executeSend(emailId: emailId)
+                do {
+                    try await composeEmail.executeSend(emailId: emailId)
+                    NSLog("[UI] executeSend completed successfully for \(emailId)")
+                } catch {
+                    NSLog("[UI] executeSend FAILED for \(emailId): \(error)")
+                }
+                AttachmentPickerView.cleanupTempAttachments()
             }
         case .savedDraft, .discarded, .cancelled:
             break

@@ -1298,6 +1298,8 @@ struct ThreadListView: View {
                 } catch {
                     NSLog("[UI] executeSend FAILED for \(emailId): \(error)")
                 }
+                // Clean up temp attachment files now that send completed (or failed)
+                AttachmentPickerView.cleanupTempAttachments()
             }
         case .savedDraft:
             // Could show a "Draft saved" toast here
