@@ -102,6 +102,14 @@ public final class Account {
 
     // MARK: - Init
 
+    /// Creates a new Account.
+    ///
+    /// **Backward compatibility note**: The default values for `imapHost`, `imapPort`,
+    /// `smtpHost`, `smtpPort`, and `authType` are Gmail-specific. These defaults exist
+    /// for backward compatibility with V1 (Gmail-only) code paths and tests that
+    /// create accounts without specifying server details. New multi-provider accounts
+    /// should always supply explicit values via the `ProviderConfiguration` convenience
+    /// initializer instead of relying on these defaults.
     public init(
         id: String = UUID().uuidString,
         email: String,

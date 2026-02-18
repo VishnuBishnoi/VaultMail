@@ -226,7 +226,20 @@ struct ProviderSelectionView: View {
     // MARK: - Actions
 
     private func discoverAndRoute() {
-        guard !email.isEmpty else { return }
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        // Basic email format validation
+        guard trimmed.contains("@"),
+              let atIndex = trimmed.lastIndex(of: "@"),
+              atIndex > trimmed.startIndex,
+              trimmed.index(after: atIndex) < trimmed.endIndex,
+              trimmed[trimmed.index(after: atIndex)...].contains(".") else {
+            errorMessage = "Please enter a valid email address."
+            return
+        }
+
+        email = trimmed
         isDiscovering = true
         errorMessage = nil
 
@@ -241,7 +254,10 @@ struct ProviderSelectionView: View {
                         addGmailAccount()
                     } else {
                         // Outlook (blocked) — show informative error
-                        errorMessage = "Outlook sign-in is coming soon."
+                        errorMessage = String(
+                            localized: "Outlook sign-in is coming soon.",
+                            comment: "Provider selection: Outlook not yet supported"
+                        )
                     }
                 case .plain:
                     navigationDestination = .appPassword(knownProvider)

@@ -87,19 +87,21 @@ public final class IDLEMonitorUseCase: IDLEMonitorUseCaseProtocol {
                     }
                     resolvedAccountId = account.id
 
-                    guard let credential = try await keychain.retrieveCredential(for: account.id) else {
-                        NSLog("[IDLE] No credentials found for account \(accountId)")
+                    // 2. Resolve IMAP credential via shared CredentialResolver
+                    let credentialResolver = CredentialResolver(
+                        keychainManager: keychain,
+                        accountRepository: accountRepo
+                    )
+                    let imapCredential: IMAPCredential
+                    do {
+                        imapCredential = try await credentialResolver.resolveIMAPCredential(
+                            for: account,
+                            refreshIfNeeded: true
+                        )
+                    } catch {
+                        NSLog("[IDLE] No credentials found for account \(accountId): \(error)")
                         continuation.yield(.disconnected)
                         return
-                    }
-
-                    // 2. Resolve IMAP credential and checkout a dedicated IDLE connection
-                    let imapCredential: IMAPCredential
-                    switch credential {
-                    case .oauth(let token):
-                        imapCredential = .xoauth2(email: account.email, accessToken: token.accessToken)
-                    case .password(let password):
-                        imapCredential = .plain(username: account.email, password: password)
                     }
 
                     client = try await provider.checkoutConnection(
@@ -110,16 +112,22 @@ public final class IDLEMonitorUseCase: IDLEMonitorUseCaseProtocol {
                         credential: imapCredential
                     )
 
+                    guard let c = client else {
+                        continuation.yield(.disconnected)
+                        return
+                    }
+
                     // 2b. Set provider-specific IDLE refresh interval (MP-13)
                     if let providerConfig = ProviderRegistry.provider(for: account.resolvedProvider) {
-                        client!.idleRefreshInterval = providerConfig.idleRefreshInterval
+                        // idleRefreshInterval uses thread-safe LockedValue storage
+                        client?.idleRefreshInterval = providerConfig.idleRefreshInterval
                     }
 
                     // 3. Select the folder for IDLE
-                    _ = try await client!.selectFolder(folderImapPath)
+                    _ = try await c.selectFolder(folderImapPath)
 
                     // 4. Start IDLE — the callback fires on each EXISTS notification
-                    try await client!.startIDLE {
+                    try await c.startIDLE {
                         continuation.yield(.newMail)
                     }
 

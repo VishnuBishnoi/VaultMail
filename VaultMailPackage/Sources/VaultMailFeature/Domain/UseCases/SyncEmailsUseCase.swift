@@ -347,39 +347,18 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
 
     /// Resolves account credentials and returns the appropriate IMAP credential.
     ///
-    /// For OAuth accounts: refreshes the token if needed, falls back to existing.
-    /// For app-password accounts: returns the password directly.
-    ///
-    /// This replaces the legacy `getAccessToken` which only handled OAuth.
+    /// Delegates to `CredentialResolver` which handles OAuth token refresh
+    /// with fallback to existing token, and direct password credential mapping.
     private func resolveIMAPCredential(for account: Account) async throws -> IMAPCredential {
-        guard let credential = try await keychainManager.retrieveCredential(for: account.id) else {
-            NSLog("[Sync] No credentials found in keychain for \(account.id)")
-            throw SyncError.tokenRefreshFailed("No credentials found in keychain.")
-        }
-
-        switch credential {
-        case .password(let password):
-            NSLog("[Sync] Using app password for account \(account.id)")
-            return .plain(username: account.email, password: password)
-
-        case .oauth:
-            // Try to refresh the OAuth token first
-            do {
-                NSLog("[Sync] Refreshing token for account \(account.id)...")
-                let token = try await accountRepository.refreshToken(for: account.id)
-                NSLog("[Sync] Token refreshed successfully, expires: \(token.expiresAt)")
-                return .xoauth2(email: account.email, accessToken: token.accessToken)
-            } catch {
-                NSLog("[Sync] Token refresh failed: \(error), trying existing token...")
-                // If refresh fails, try using existing token from keychain
-                if let existing = try await keychainManager.retrieve(for: account.id) {
-                    NSLog("[Sync] Found existing token, expired: \(existing.isExpired), expires: \(existing.expiresAt)")
-                    if !existing.isExpired {
-                        return .xoauth2(email: account.email, accessToken: existing.accessToken)
-                    }
-                }
-                throw SyncError.tokenRefreshFailed(error.localizedDescription)
-            }
+        let resolver = CredentialResolver(
+            keychainManager: keychainManager,
+            accountRepository: accountRepository
+        )
+        do {
+            return try await resolver.resolveIMAPCredential(for: account, refreshIfNeeded: true)
+        } catch {
+            NSLog("[Sync] Credential resolution failed for \(account.id): \(error)")
+            throw SyncError.tokenRefreshFailed(error.localizedDescription)
         }
     }
 

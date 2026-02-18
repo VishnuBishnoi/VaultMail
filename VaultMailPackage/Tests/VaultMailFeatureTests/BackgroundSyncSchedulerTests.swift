@@ -79,6 +79,10 @@ struct BackgroundSyncSchedulerTests {
         func reAuthenticateAccount(id: String) async throws {
             fatalError("Not used in scheduler tests")
         }
+
+        func updateAppPassword(for accountId: String, newPassword: String) async throws {
+            fatalError("Not used in scheduler tests")
+        }
     }
 
     // MARK: - Tests

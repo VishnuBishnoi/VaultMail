@@ -508,12 +508,12 @@ public final class ManageThreadActionsUseCase: ManageThreadActionsUseCaseProtoco
 
     /// Resolves the Trash folder IMAP path for the given operations' account.
     private func resolveTrashPath(for operations: [IMAPOperation]) async -> String {
-        guard let accountId = operations.first?.accountId else { return "[Gmail]/Trash" }
+        guard let accountId = operations.first?.accountId else { return "Trash" }
 
         guard let folders = try? await repository.getFolders(accountId: accountId) else {
-            return "[Gmail]/Trash" // Reasonable default
+            return "Trash" // Provider-agnostic fallback
         }
-        return folders.first(where: { $0.folderType == FolderType.trash.rawValue })?.imapPath ?? "[Gmail]/Trash"
+        return folders.first(where: { $0.folderType == FolderType.trash.rawValue })?.imapPath ?? "Trash"
     }
 
     /// Expunges emails from INBOX without copying (Gmail label semantics).
@@ -569,27 +569,14 @@ public final class ManageThreadActionsUseCase: ManageThreadActionsUseCaseProtoco
 
     /// Resolves IMAP credential from Keychain based on account auth type.
     private func resolveIMAPCredential(for account: Account) async throws -> IMAPCredential {
-        guard let storedCredential = try await keychainManager.retrieveCredential(for: account.id) else {
-            throw ThreadListError.actionFailed("No credentials found for account \(account.id)")
-        }
-
-        switch storedCredential {
-        case .oauth(var token):
-            // Refresh if needed
-            if token.isExpired || token.isNearExpiry {
-                do {
-                    token = try await accountRepository.refreshToken(for: account.id)
-                } catch {
-                    if !token.isExpired {
-                        // Use existing token if not fully expired
-                    } else {
-                        throw ThreadListError.actionFailed("Token refresh failed: \(error.localizedDescription)")
-                    }
-                }
-            }
-            return .xoauth2(email: account.email, accessToken: token.accessToken)
-        case .password(let pw):
-            return .plain(username: account.email, password: pw)
+        let resolver = CredentialResolver(
+            keychainManager: keychainManager,
+            accountRepository: accountRepository
+        )
+        do {
+            return try await resolver.resolveIMAPCredential(for: account, refreshIfNeeded: true)
+        } catch {
+            throw ThreadListError.actionFailed("Credential resolution failed: \(error.localizedDescription)")
         }
     }
 }

@@ -1,27 +1,6 @@
 @preconcurrency import Network
 import Foundation
 
-// MARK: - Thread-Safe Resume Guard
-
-/// Atomic flag ensuring a continuation is resumed exactly once.
-///
-/// NWConnection callbacks run on arbitrary dispatch queues, so
-/// multiple state transitions or a timeout can race to resume
-/// the same continuation. This guard prevents double-resume crashes.
-private final class AtomicFlag: @unchecked Sendable {
-    private var _value = false
-    private let lock = NSLock()
-
-    /// Tries to claim the flag. Returns `true` on the first call only.
-    func trySet() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !_value else { return false }
-        _value = true
-        return true
-    }
-}
-
 // MARK: - IMAPSession
 
 /// Low-level IMAP session managing a single connection.
@@ -256,6 +235,9 @@ actor IMAPSession {
                     break
                 }
                 if line.hasPrefix("\(reCapTag) NO") || line.hasPrefix("\(reCapTag) BAD") {
+                    await stConn.disconnect()
+                    self.starttlsConnection = nil
+                    self.activeSecurityMode = nil
                     throw IMAPError.commandFailed("Post-TLS CAPABILITY failed: \(line)")
                 }
             }
@@ -296,7 +278,43 @@ actor IMAPSession {
 
     // MARK: - Disconnect
 
-    /// Disconnects from the IMAP server gracefully.
+    /// Disconnects from the IMAP server gracefully (async version).
+    ///
+    /// Properly awaits STARTTLS connection cleanup instead of fire-and-forget.
+    /// Prefer this over the synchronous `disconnect()` in async contexts.
+    func disconnectAsync() async {
+        switch activeSecurityMode {
+        case .tls:
+            if isSessionConnected {
+                tagCounter += 1
+                let tag = makeTag()
+                let cmd = Data("\(tag) LOGOUT\r\n".utf8)
+                connection?.send(content: cmd, completion: .idempotent)
+            }
+            connection?.cancel()
+            connection = nil
+        case .starttls:
+            let conn = starttlsConnection
+            starttlsConnection = nil
+            if let conn { await conn.disconnect() }
+        #if DEBUG
+        case .some(.none):
+            let conn = starttlsConnection
+            starttlsConnection = nil
+            if let conn { await conn.disconnect() }
+        #endif
+        case nil:
+            break
+        }
+        receiveBuffer.removeAll()
+        currentIdleTag = nil
+        activeSecurityMode = nil
+    }
+
+    /// Disconnects from the IMAP server gracefully (synchronous fallback).
+    ///
+    /// Note: For STARTTLS connections, cleanup runs in an unstructured Task.
+    /// Prefer `disconnectAsync()` in async contexts for proper cleanup.
     func disconnect() {
         switch activeSecurityMode {
         case .tls:
@@ -695,7 +713,7 @@ actor IMAPSession {
                         cont.resume(throwing: IMAPError.timeout)
                     }
 
-                    conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, _, error in
+                    conn.receive(minimumIncompleteLength: 1, maximumLength: AppConstants.socketReadBufferSize) { data, _, _, error in
                         guard flag.trySet() else { return }
                         if let error {
                             cont.resume(throwing: IMAPError.connectionFailed(error.localizedDescription))

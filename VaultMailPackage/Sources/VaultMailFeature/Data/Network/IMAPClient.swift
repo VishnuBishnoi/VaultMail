@@ -1,5 +1,19 @@
 import Foundation
 
+/// Thread-safe mutable value box for crossing actor isolation boundaries.
+/// Used for properties that need to be set from outside an actor (e.g., IDLE interval).
+private final class LockedValue<T: Sendable>: @unchecked Sendable {
+    private var _value: T
+    private let lock = NSLock()
+
+    init(_ value: T) { _value = value }
+
+    var value: T {
+        get { lock.withLock { _value } }
+        set { lock.withLock { _value = newValue } }
+    }
+}
+
 /// Production IMAP client conforming to `IMAPClientProtocol`.
 ///
 /// Uses `IMAPSession` for TLS connection management and `IMAPResponseParser`
@@ -30,7 +44,12 @@ public actor IMAPClient: IMAPClientProtocol {
 
     /// Configurable IDLE refresh interval per provider (MP-13).
     /// Defaults to 25 minutes (Gmail). Yahoo uses 4 minutes.
-    public nonisolated(unsafe) var idleRefreshInterval: TimeInterval = AppConstants.imapIdleRefreshInterval
+    /// Thread-safe via LockedValue since it is set from outside the actor before IDLE starts.
+    private let _idleRefreshStorage = LockedValue(AppConstants.imapIdleRefreshInterval)
+    public nonisolated var idleRefreshInterval: TimeInterval {
+        get { _idleRefreshStorage.value }
+        set { _idleRefreshStorage.value = newValue }
+    }
 
     // MARK: - Init
 
@@ -96,14 +115,14 @@ public actor IMAPClient: IMAPClientProtocol {
                     let delay = AppConstants.imapRetryBaseDelay * pow(3.0, Double(attempt))
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     // Disconnect before retrying
-                    await session.disconnect()
+                    await session.disconnectAsync()
                 }
             } catch {
                 lastError = error
                 if attempt < AppConstants.imapMaxRetries {
                     let delay = AppConstants.imapRetryBaseDelay * pow(3.0, Double(attempt))
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                    await session.disconnect()
+                    await session.disconnectAsync()
                 }
             }
         }
@@ -129,7 +148,7 @@ public actor IMAPClient: IMAPClientProtocol {
         idleTask = nil
         idleHandler = nil
 
-        await session.disconnect()
+        await session.disconnectAsync()
         _isConnected = false
         _selectedFolder = nil
     }

@@ -104,7 +104,7 @@ actor SMTPSession {
             using: params
         )
 
-        let flag = SMTPAtomicFlag()
+        let flag = AtomicFlag()
         let timeoutInterval = timeout
         let queue = connectionQueue
 
@@ -235,6 +235,9 @@ actor SMTPSession {
             try await stConn.sendLine("EHLO vaultmail.local")
             let (reEhloCode, reEhloText) = try await stConn.readSMTPResponse()
             guard reEhloCode == 250 else {
+                await stConn.disconnect()
+                self.starttlsConnection = nil
+                self.activeSecurityMode = nil
                 throw SMTPError.commandFailed("Post-TLS EHLO rejected: \(reEhloText)")
             }
         } catch let error as ConnectionError {
@@ -243,7 +246,9 @@ actor SMTPSession {
             self.activeSecurityMode = nil
             throw mapConnectionError(error)
         } catch let error as SMTPError {
-            // SMTPErrors already mapped — just rethrow
+            await stConn.disconnect()
+            self.starttlsConnection = nil
+            self.activeSecurityMode = nil
             throw error
         }
     }
@@ -283,7 +288,40 @@ actor SMTPSession {
 
     // MARK: - Disconnect
 
-    /// Disconnects from the SMTP server gracefully.
+    /// Disconnects from the SMTP server gracefully (async version).
+    ///
+    /// Properly awaits STARTTLS connection cleanup instead of fire-and-forget.
+    /// Prefer this over the synchronous `disconnect()` in async contexts.
+    func disconnectAsync() async {
+        switch activeSecurityMode {
+        case .tls:
+            if isSessionConnected {
+                let cmd = Data("QUIT\r\n".utf8)
+                connection?.send(content: cmd, completion: .idempotent)
+            }
+            connection?.cancel()
+            connection = nil
+        case .starttls:
+            let conn = starttlsConnection
+            starttlsConnection = nil
+            if let conn { await conn.disconnect() }
+        #if DEBUG
+        case .some(.none):
+            let conn = starttlsConnection
+            starttlsConnection = nil
+            if let conn { await conn.disconnect() }
+        #endif
+        case nil:
+            break
+        }
+        receiveBuffer.removeAll()
+        activeSecurityMode = nil
+    }
+
+    /// Disconnects from the SMTP server gracefully (synchronous fallback).
+    ///
+    /// Note: For STARTTLS connections, cleanup runs in an unstructured Task.
+    /// Prefer `disconnectAsync()` in async contexts for proper cleanup.
     func disconnect() {
         switch activeSecurityMode {
         case .tls:
@@ -358,8 +396,11 @@ actor SMTPSession {
     ///   - password: App-specific password
     /// - Throws: `SMTPError.authenticationFailed`
     func authenticatePLAIN(username: String, password: String) async throws {
+        // Sanitize null bytes from inputs to prevent SASL structure corruption
+        let cleanUser = username.replacingOccurrences(of: "\u{00}", with: "")
+        let cleanPass = password.replacingOccurrences(of: "\u{00}", with: "")
         // Build SASL PLAIN string: "\0username\0password" → base64
-        let authString = "\u{00}\(username)\u{00}\(password)"
+        let authString = "\u{00}\(cleanUser)\u{00}\(cleanPass)"
         let base64Auth = Data(authString.utf8).base64EncodedString()
 
         let response = try await sendCommand("AUTH PLAIN \(base64Auth)")
@@ -553,7 +594,7 @@ actor SMTPSession {
                 throw SMTPError.connectionFailed("Not connected")
             }
 
-            let flag = SMTPAtomicFlag()
+            let flag = AtomicFlag()
             let effectiveTimeout = timeout
 
             let data: Data = try await withTaskCancellationHandler {
@@ -561,7 +602,7 @@ actor SMTPSession {
                     // Receive task
                     group.addTask {
                         try await withCheckedThrowingContinuation { cont in
-                            conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, _, error in
+                            conn.receive(minimumIncompleteLength: 1, maximumLength: AppConstants.socketReadBufferSize) { data, _, _, error in
                                 guard flag.trySet() else { return }
                                 if let error {
                                     cont.resume(throwing: SMTPError.connectionFailed(error.localizedDescription))
@@ -662,19 +703,3 @@ actor SMTPSession {
     }
 }
 
-// MARK: - Thread-Safe Resume Guard
-
-/// Atomic flag ensuring a continuation is resumed exactly once.
-/// Same pattern as IMAPSession's AtomicFlag, scoped to SMTP module.
-private final class SMTPAtomicFlag: @unchecked Sendable {
-    private var _value = false
-    private let lock = NSLock()
-
-    func trySet() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !_value else { return false }
-        _value = true
-        return true
-    }
-}

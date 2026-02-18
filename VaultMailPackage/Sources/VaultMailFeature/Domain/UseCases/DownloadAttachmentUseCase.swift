@@ -130,16 +130,19 @@ public final class DownloadAttachmentUseCase: DownloadAttachmentUseCaseProtocol 
             throw EmailDetailError.downloadFailed("Account not found")
         }
 
-        guard let credential = try await keychainManager.retrieveCredential(for: account.id) else {
-            throw EmailDetailError.downloadFailed("No credentials found for account")
-        }
-
+        // Resolve credential via shared CredentialResolver (with refresh for OAuth)
+        let credentialResolver = CredentialResolver(
+            keychainManager: keychainManager,
+            accountRepository: accountRepository
+        )
         let imapCredential: IMAPCredential
-        switch credential {
-        case .oauth(let token):
-            imapCredential = .xoauth2(email: account.email, accessToken: token.accessToken)
-        case .password(let pw):
-            imapCredential = .plain(username: account.email, password: pw)
+        do {
+            imapCredential = try await credentialResolver.resolveIMAPCredential(
+                for: account,
+                refreshIfNeeded: true
+            )
+        } catch {
+            throw EmailDetailError.downloadFailed("No credentials found for account: \(error.localizedDescription)")
         }
 
         // 2. Get IMAP UID and folder path from EmailFolder junction

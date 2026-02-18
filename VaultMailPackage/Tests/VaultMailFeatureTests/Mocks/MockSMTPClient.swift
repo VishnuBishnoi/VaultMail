@@ -12,6 +12,11 @@ actor MockSMTPClient: SMTPClientProtocol {
     var connectError: SMTPError = .connectionFailed("mock error")
     var sendError: SMTPError = .commandFailed("mock error")
 
+    var lastConnectHost: String?
+    var lastConnectPort: Int?
+    var lastConnectSecurity: ConnectionSecurity?
+    var lastConnectCredential: SMTPCredential?
+
     var lastFrom: String?
     var lastRecipients: [String]?
     var lastMessageData: Data?
@@ -30,6 +35,10 @@ actor MockSMTPClient: SMTPClientProtocol {
 
     func connect(host: String, port: Int, security: ConnectionSecurity, credential: SMTPCredential) async throws {
         connectCallCount += 1
+        lastConnectHost = host
+        lastConnectPort = port
+        lastConnectSecurity = security
+        lastConnectCredential = credential
         if shouldThrowOnConnect {
             throw connectError
         }

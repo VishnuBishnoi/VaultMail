@@ -167,8 +167,8 @@ public enum ProviderFolderMapper {
         // Drafts
         if lower.contains("draft") { return .drafts }
 
-        // Trash / Deleted
-        if lower.contains("trash") || lower.contains("deleted") || lower.contains("bin") {
+        // Trash / Deleted / Recycle Bin
+        if lower.contains("trash") || lower.contains("deleted") || lower == "bin" || lower.contains("recycle bin") {
             return .trash
         }
 

@@ -42,7 +42,12 @@ public protocol ManageAccountsUseCaseProtocol {
 
     /// Re-authenticate an inactive account via OAuth, update the token,
     /// and set the account back to active.
+    /// For app-password accounts, throws `AccountError.appPasswordReAuthRequired`.
     func reAuthenticateAccount(id: String) async throws
+
+    /// Update the app password for a PLAIN-auth account and re-activate it.
+    /// Validates the new password via IMAP before storing.
+    func updateAppPassword(for accountId: String, newPassword: String) async throws
 }
 
 /// Closure type for resolving the authenticated user's email from an access token.
@@ -196,6 +201,9 @@ public final class ManageAccountsUseCase: ManageAccountsUseCaseProtocol {
     }
 
     public func removeAccount(id: String) async throws -> Bool {
+        // Delete Keychain credential first (security: prevent stale tokens/passwords)
+        try? await keychainManager.deleteCredential(for: id)
+
         try await repository.removeAccount(id: id)
 
         // Check if any accounts remain
@@ -212,17 +220,49 @@ public final class ManageAccountsUseCase: ManageAccountsUseCaseProtocol {
     }
 
     public func reAuthenticateAccount(id: String) async throws {
-        // Step 1: Re-authenticate via OAuth
-        let newToken = try await oauthManager.authenticate()
-
-        // Step 2: Update Keychain with new token
-        try await keychainManager.update(newToken, for: id)
-
-        // Step 3: Fetch and re-activate account
+        // Fetch account to determine auth method
         let accounts = try await repository.getAccounts()
         guard let account = accounts.first(where: { $0.id == id }) else {
             throw AccountError.notFound(id)
         }
+
+        // Check if this is an app-password provider (PLAIN auth)
+        if account.resolvedAuthMethod == .plain {
+            throw AccountError.appPasswordReAuthRequired(account.email)
+        }
+
+        // OAuth re-authentication flow
+        let newToken = try await oauthManager.authenticate()
+        try await keychainManager.update(newToken, for: id)
+
+        account.isActive = true
+        try await repository.updateAccount(account)
+    }
+
+    /// Updates an app-password account's credential and re-activates it.
+    ///
+    /// Spec ref: FR-MPROV-06
+    public func updateAppPassword(for accountId: String, newPassword: String) async throws {
+        let accounts = try await repository.getAccounts()
+        guard let account = accounts.first(where: { $0.id == accountId }) else {
+            throw AccountError.notFound(accountId)
+        }
+
+        // Validate new password with IMAP connection
+        if let provider = connectionProvider {
+            let credential: IMAPCredential = .plain(username: account.email, password: newPassword)
+            let client = try await provider.checkoutConnection(
+                accountId: account.id,
+                host: account.imapHost,
+                port: account.imapPort,
+                security: account.resolvedImapSecurity,
+                credential: credential
+            )
+            await provider.checkinConnection(client, accountId: account.id)
+        }
+
+        // Store updated password
+        try await keychainManager.updateCredential(.password(newPassword), for: accountId)
 
         account.isActive = true
         try await repository.updateAccount(account)

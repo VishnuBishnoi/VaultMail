@@ -67,6 +67,9 @@ public enum AppConstants {
     /// Maximum email body size in bytes (FR-SYNC-01: 10 MB)
     public static let maxEmailBodySizeBytes = 10 * 1024 * 1024
 
+    /// Read buffer size for socket I/O (64 KB)
+    public static let socketReadBufferSize = 65_536
+
     // MARK: - Thread List (FR-TL-01)
 
     /// Number of threads per page for cursor-based pagination (FR-TL-01)

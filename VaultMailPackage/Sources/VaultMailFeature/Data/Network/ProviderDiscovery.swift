@@ -26,10 +26,15 @@ public actor ProviderDiscovery {
     private struct CacheEntry: Sendable {
         let config: DiscoveredConfig
         let cachedAt: Date
+        /// Tracks last access time for LRU eviction.
+        var lastAccessedAt: Date
     }
 
     /// Cache TTL: 30 days
     private static let cacheTTL: TimeInterval = 30 * 24 * 60 * 60
+
+    /// Maximum cache entries before LRU eviction kicks in.
+    private static let maxCacheSize = 100
 
     /// Per-tier timeout: 10 seconds
     private static let tierTimeout: TimeInterval = 10
@@ -57,7 +62,9 @@ public actor ProviderDiscovery {
         guard let domain = extractDomain(from: email) else { return nil }
 
         // Check cache first
-        if let cached = cache[domain], Date().timeIntervalSince(cached.cachedAt) < Self.cacheTTL {
+        if var cached = cache[domain], Date().timeIntervalSince(cached.cachedAt) < Self.cacheTTL {
+            cached.lastAccessedAt = Date()
+            cache[domain] = cached
             return cached.config
         }
 
@@ -106,7 +113,14 @@ public actor ProviderDiscovery {
     /// URL format: `https://autoconfig.thunderbird.net/v1.1/{domain}`
     /// The response is XML with `<incomingServer>` and `<outgoingServer>` elements.
     private func discoverFromISPDB(domain: String) async -> DiscoveredConfig? {
-        let urlString = "https://autoconfig.thunderbird.net/v1.1/\(domain)"
+        // Validate domain to prevent path traversal (P1-02)
+        let validDomain = domain.lowercased()
+        guard !validDomain.isEmpty,
+              validDomain.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == ".") }),
+              let encoded = validDomain.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            return nil
+        }
+        let urlString = "https://autoconfig.thunderbird.net/v1.1/\(encoded)"
         guard let url = URL(string: urlString) else { return nil }
 
         do {
@@ -214,12 +228,21 @@ public actor ProviderDiscovery {
         }
     }
 
-    /// Resolves MX records for a domain using `dnssd` via Process.
+    /// Resolves MX records for a domain using the `/usr/bin/host` command.
+    ///
+    /// **iOS limitation**: This method uses `Process` (Foundation), which is only
+    /// available on macOS. On iOS, `Process` is not part of the public API and
+    /// will not compile. The `#if os(macOS)` guard ensures that iOS builds
+    /// return an empty array, effectively disabling Tier 3 DNS discovery.
+    /// On iOS, provider discovery relies on Tier 1 (static registry) and
+    /// Tier 2 (Mozilla ISPDB). If both fail, the user is shown the manual
+    /// setup screen (Tier 4 fallback).
+    ///
+    /// A future improvement could use `dnssd` (DNS Service Discovery) framework
+    /// or `CFHost` for cross-platform MX resolution.
     ///
     /// Falls back to an empty array on failure.
     private func resolveMXRecords(for domain: String) async throws -> [String] {
-        // Use host command for MX lookup (available on macOS only)
-        // On iOS (device and simulator), return empty — manual setup handles this case
         #if os(macOS)
         return try await withCheckedThrowingContinuation { continuation in
             Task.detached {
@@ -269,7 +292,15 @@ public actor ProviderDiscovery {
     }
 
     private func cacheResult(_ config: DiscoveredConfig, for domain: String) {
-        cache[domain] = CacheEntry(config: config, cachedAt: Date())
+        let now = Date()
+        cache[domain] = CacheEntry(config: config, cachedAt: now, lastAccessedAt: now)
+
+        // LRU eviction: if cache exceeds max size, remove the least recently accessed entry.
+        if cache.count > Self.maxCacheSize {
+            if let lruKey = cache.min(by: { $0.value.lastAccessedAt < $1.value.lastAccessedAt })?.key {
+                cache.removeValue(forKey: lruKey)
+            }
+        }
     }
 
     /// Runs an async operation with a timeout.
@@ -301,7 +332,10 @@ public actor ProviderDiscovery {
 ///
 /// Extracts the first `<incomingServer type="imap">` and `<outgoingServer type="smtp">`
 /// elements with their hostname, port, and socketType.
-final class ISPDBXMLParser: NSObject, XMLParserDelegate, @unchecked Sendable {
+///
+/// This class is only used synchronously within the `ProviderDiscovery` actor,
+/// so it does not need `Sendable` conformance.
+final class ISPDBXMLParser: NSObject, XMLParserDelegate {
 
     struct ServerConfig {
         var hostname: String = ""

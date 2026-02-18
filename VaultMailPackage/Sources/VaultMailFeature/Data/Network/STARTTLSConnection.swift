@@ -8,8 +8,8 @@ import Foundation
 /// so concurrent access is impossible. The `@unchecked Sendable` conformance
 /// lets us pass them into `@Sendable` closures dispatched to that queue.
 ///
-/// This follows the same pattern as `AtomicFlag` / `SMTPAtomicFlag` in the
-/// existing codebase — wrapping non-Sendable types with explicit thread safety.
+/// This follows the same pattern as `AtomicFlag` in the existing codebase —
+/// wrapping non-Sendable types with explicit thread safety.
 private final class StreamBox: @unchecked Sendable {
     let input: InputStream
     let output: OutputStream
@@ -95,6 +95,10 @@ actor STARTTLSConnection {
     ///   - port: Server port (143 for IMAP STARTTLS, 587 for SMTP STARTTLS)
     /// - Throws: `ConnectionError.connectionFailed`, `ConnectionError.timeout`
     func connect(host: String, port: Int) async throws {
+        guard streams == nil else {
+            throw ConnectionError.connectionFailed("Already connected")
+        }
+
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
 
@@ -115,7 +119,7 @@ actor STARTTLSConnection {
             input: cfRead as InputStream,
             output: cfWrite as OutputStream
         )
-        let flag = AtomicConnectionFlag()
+        let flag = AtomicFlag()
         let effectiveTimeout = timeout
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
@@ -128,12 +132,6 @@ actor STARTTLSConnection {
             }
 
             self.streamQueue.async {
-                // Set VOIP flag for background socket keepalive on iOS
-                box.input.setProperty(
-                    StreamNetworkServiceTypeValue.voIP.rawValue,
-                    forKey: .networkServiceType
-                )
-
                 box.input.schedule(in: .current, forMode: .default)
                 box.output.schedule(in: .current, forMode: .default)
 
@@ -206,7 +204,7 @@ actor STARTTLSConnection {
             kCFStreamSSLValidatesCertificateChain: true as NSNumber
         ] as NSDictionary)
 
-        let flag = AtomicConnectionFlag()
+        let flag = AtomicFlag()
         let effectiveTimeout = timeout
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
@@ -324,7 +322,7 @@ actor STARTTLSConnection {
             throw ConnectionError.connectionFailed("Not connected")
         }
 
-        let flag = AtomicConnectionFlag()
+        let flag = AtomicFlag()
         let effectiveTimeout = timeout
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
@@ -379,7 +377,7 @@ actor STARTTLSConnection {
         }
 
         let effectiveTimeout = readTimeout ?? timeout
-        let flag = AtomicConnectionFlag()
+        let flag = AtomicFlag()
 
         let data: Data = try await withCheckedThrowingContinuation { cont in
             self.streamQueue.asyncAfter(deadline: .now() + effectiveTimeout) {
@@ -392,7 +390,7 @@ actor STARTTLSConnection {
 
                 while Date() < deadline {
                     if box.input.hasBytesAvailable {
-                        var buffer = [UInt8](repeating: 0, count: 65536)
+                        var buffer = [UInt8](repeating: 0, count: AppConstants.socketReadBufferSize)
                         let bytesRead = box.input.read(&buffer, maxLength: buffer.count)
 
                         if bytesRead > 0 {
@@ -493,8 +491,14 @@ actor STARTTLSConnection {
         streams = nil
         receiveBuffer.removeAll()
         isTLSActive = false
-        box?.input.close()
-        box?.output.close()
+        if let box {
+            streamQueue.async {
+                box.input.remove(from: .current, forMode: .default)
+                box.output.remove(from: .current, forMode: .default)
+                box.input.close()
+                box.output.close()
+            }
+        }
     }
 
     // MARK: - Private: Buffer Management
@@ -563,21 +567,3 @@ enum ConnectionError: Error, LocalizedError, Equatable, Sendable {
     }
 }
 
-// MARK: - Thread-Safe Resume Guard
-
-/// Atomic flag ensuring a continuation is resumed exactly once.
-///
-/// Same pattern as `IMAPSession.AtomicFlag` — prevents double-resume
-/// when timeout and data arrival race.
-private final class AtomicConnectionFlag: @unchecked Sendable {
-    private var _value = false
-    private let lock = NSLock()
-
-    func trySet() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !_value else { return false }
-        _value = true
-        return true
-    }
-}

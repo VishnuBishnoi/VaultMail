@@ -74,7 +74,7 @@ public actor SMTPClient: SMTPClientProtocol {
                 if attempt < AppConstants.imapMaxRetries {
                     let delay = AppConstants.imapRetryBaseDelay * pow(3.0, Double(attempt))
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                    await session.disconnect()
+                    await session.disconnectAsync()
                 }
             }
         }
@@ -96,7 +96,7 @@ public actor SMTPClient: SMTPClientProtocol {
 
     /// Disconnects from the SMTP server gracefully.
     public func disconnect() async {
-        await session.disconnect()
+        await session.disconnectAsync()
         _isConnected = false
     }
 

@@ -269,33 +269,21 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
                 throw ComposerError.sendFailed("Account not found for email")
             }
 
-            // Resolve credential from Keychain (OAuth token or app password)
-            guard let credential = try await keychainManager.retrieveCredential(for: account.id) else {
+            // Resolve both IMAP and SMTP credentials via shared CredentialResolver
+            let credResolver = CredentialResolver(
+                keychainManager: keychainManager,
+                accountRepository: accountRepository
+            )
+            let resolvedSmtpCredential: SMTPCredential
+            let resolvedImapCredential: IMAPCredential
+            do {
+                let creds = try await credResolver.resolveBothCredentials(for: account, refreshIfNeeded: true)
+                resolvedSmtpCredential = creds.smtp
+                resolvedImapCredential = creds.imap
+            } catch {
                 email.sendState = SendState.failed.rawValue
                 try await repository.saveEmail(email)
-                throw ComposerError.sendFailed("No credentials found. Please re-authenticate.")
-            }
-
-            let accessToken: String
-            let appPassword: String?
-            switch credential {
-            case .oauth(let token):
-                appPassword = nil
-                if token.isExpired || token.isNearExpiry {
-                    do {
-                        let refreshed = try await accountRepository.refreshToken(for: account.id)
-                        accessToken = refreshed.accessToken
-                    } catch {
-                        email.sendState = SendState.failed.rawValue
-                        try await repository.saveEmail(email)
-                        throw ComposerError.sendFailed("Token refresh failed: \(error.localizedDescription)")
-                    }
-                } else {
-                    accessToken = token.accessToken
-                }
-            case .password(let pw):
-                accessToken = "" // Not used for PLAIN auth
-                appPassword = pw
+                throw ComposerError.sendFailed("Credential resolution failed: \(error.localizedDescription)")
             }
 
             // Decode recipient addresses
@@ -379,12 +367,8 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
                 throw error
             }
 
-            // Resolve SMTP credential based on account auth type
-            let smtpCredential: SMTPCredential = resolveSmtpCredential(
-                account: account,
-                accessToken: accessToken,
-                appPassword: appPassword
-            )
+            // Use pre-resolved SMTP credential
+            let smtpCredential = resolvedSmtpCredential
 
             // Connect to SMTP and send
             NSLog("[ComposeSend] Connecting SMTP: \(account.smtpHost):\(account.smtpPort) security=\(account.resolvedSmtpSecurity.rawValue)")
@@ -475,8 +459,7 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
                 await appendToSentFolder(
                     account: account,
                     messageData: messageData,
-                    accessToken: accessToken,
-                    appPassword: appPassword,
+                    imapCredential: resolvedImapCredential,
                     connectionProvider: provider
                 )
             }
@@ -556,18 +539,6 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
 
     // MARK: - Provider-Aware Helpers
 
-    /// Resolves the SMTP credential from account settings and retrieved credentials.
-    private func resolveSmtpCredential(
-        account: Account,
-        accessToken: String,
-        appPassword: String?
-    ) -> SMTPCredential {
-        if let pw = appPassword {
-            return .plain(username: account.email, password: pw)
-        }
-        return .xoauth2(email: account.email, accessToken: accessToken)
-    }
-
     /// Appends sent message to the Sent folder via IMAP (for providers that need it).
     ///
     /// Gmail auto-copies sent messages, so this is a no-op for Gmail.
@@ -576,30 +547,21 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
     private func appendToSentFolder(
         account: Account,
         messageData: Data,
-        accessToken: String,
-        appPassword: String?,
+        imapCredential: IMAPCredential,
         connectionProvider: ConnectionProviding
     ) async {
+        var client: IMAPClientProtocol?
         do {
-            // Resolve IMAP credential
-            let imapCredential: IMAPCredential
-            if let pw = appPassword {
-                imapCredential = .plain(username: account.email, password: pw)
-            } else {
-                imapCredential = .xoauth2(email: account.email, accessToken: accessToken)
-            }
-
-            let client = try await connectionProvider.checkoutConnection(
+            client = try await connectionProvider.checkoutConnection(
                 accountId: account.id,
                 host: account.imapHost,
                 port: account.imapPort,
                 security: account.resolvedImapSecurity,
                 credential: imapCredential
             )
-            defer { Task { await connectionProvider.checkinConnection(client, accountId: account.id) } }
 
             // Find the Sent folder's IMAP path
-            let folders = try await client.listFolders()
+            let folders = try await client!.listFolders()
             let provider = account.resolvedProvider
             let sentPath = folders.first { folder in
                 let type = ProviderFolderMapper.folderType(
@@ -612,17 +574,22 @@ public final class ComposeEmailUseCase: ComposeEmailUseCaseProtocol {
 
             guard let sentPath else {
                 NSLog("[ComposeSend] No Sent folder found for IMAP APPEND — skipping")
+                await connectionProvider.checkinConnection(client!, accountId: account.id)
                 return
             }
 
-            try await client.appendMessage(
+            try await client!.appendMessage(
                 to: sentPath,
                 messageData: messageData,
                 flags: ["\\Seen"]
             )
             NSLog("[ComposeSend] IMAP APPEND to \(sentPath) succeeded")
+            await connectionProvider.checkinConnection(client!, accountId: account.id)
         } catch {
             NSLog("[ComposeSend] IMAP APPEND to Sent failed (best-effort): \(error)")
+            if let client {
+                await connectionProvider.checkinConnection(client, accountId: account.id)
+            }
         }
     }
 

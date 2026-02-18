@@ -269,6 +269,9 @@ struct MacAccountDetailView: View {
     @State private var syncWindowDays: Int = 30
     @State private var cacheLimit: Int = 500
     @State private var isReAuthenticating = false
+    @State private var showPasswordUpdate = false
+    @State private var newAppPassword = ""
+    @State private var reAuthError: String?
     @State private var showSyncWindowConfirmation = false
     @State private var pendingSyncWindow: Int?
 
@@ -360,6 +363,17 @@ struct MacAccountDetailView: View {
         } message: {
             Text("Reducing the sync window will remove local copies of older emails. Server emails are not affected.")
         }
+        .alert("Update App Password", isPresented: $showPasswordUpdate) {
+            SecureField("New App Password", text: $newAppPassword)
+            Button("Update") {
+                updatePassword()
+            }
+            Button("Cancel", role: .cancel) {
+                newAppPassword = ""
+            }
+        } message: {
+            Text("Enter the new app password for \(account.email).")
+        }
     }
 
     private func saveSyncWindow() {
@@ -374,9 +388,37 @@ struct MacAccountDetailView: View {
 
     private func reAuthenticate() {
         isReAuthenticating = true
+        reAuthError = nil
         Task {
             defer { isReAuthenticating = false }
-            try? await manageAccounts.reAuthenticateAccount(id: account.id)
+            do {
+                try await manageAccounts.reAuthenticateAccount(id: account.id)
+            } catch let accountError as AccountError {
+                if case .appPasswordReAuthRequired = accountError {
+                    showPasswordUpdate = true
+                } else {
+                    reAuthError = accountError.localizedDescription
+                }
+            } catch {
+                reAuthError = error.localizedDescription
+            }
+        }
+    }
+
+    private func updatePassword() {
+        guard !newAppPassword.isEmpty else { return }
+        isReAuthenticating = true
+        reAuthError = nil
+        Task {
+            defer {
+                isReAuthenticating = false
+                newAppPassword = ""
+            }
+            do {
+                try await manageAccounts.updateAppPassword(for: account.id, newPassword: newAppPassword)
+            } catch {
+                reAuthError = error.localizedDescription
+            }
         }
     }
 }
