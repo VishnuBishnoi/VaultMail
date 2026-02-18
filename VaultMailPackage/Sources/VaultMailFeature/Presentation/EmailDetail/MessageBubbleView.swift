@@ -458,7 +458,7 @@ struct MessageBubbleView: View {
         let newHTML = HTMLSanitizer.injectDynamicTypeCSS(
             finalHTML,
             fontSizePoints: fontSize,
-            allowRemoteImages: loadRemoteImages || isTrustedSender
+            allowRemoteImages: shouldLoadRemote
         )
 
         // If the HTML content changed, show shimmer until WebView finishes rendering

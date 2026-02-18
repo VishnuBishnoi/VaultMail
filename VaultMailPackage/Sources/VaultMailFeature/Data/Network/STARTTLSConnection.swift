@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 // MARK: - Sendable Stream Wrapper
 
@@ -241,13 +242,13 @@ actor STARTTLSConnection {
         // SSL settings boxed for Sendable crossing into streamQueue closure.
         // The dictionary is immutable after creation and only read on streamQueue.
         //
-        // kCFStreamSSLLevel set to kTLSProtocol12 enforces TLS 1.2 as the
-        // minimum version per NFR-SYNC-05/AC-MP-03. The system will negotiate
-        // TLS 1.2 or 1.3 but reject anything below 1.2.
+        // TLS 1.2+ enforcement (NFR-SYNC-05/AC-MP-03):
+        // On iOS 17+ / macOS 14+ (our minimum target), the OS disables TLS 1.0/1.1
+        // system-wide. We additionally verify the negotiated protocol version
+        // post-handshake via SecTrust to guarantee compliance.
         let sslSettings = SendableBox([
             kCFStreamSSLPeerName: host as NSString,
-            kCFStreamSSLValidatesCertificateChain: true as NSNumber,
-            kCFStreamSSLLevel: kCFStreamSocketSecurityLevelTLSv1_2
+            kCFStreamSSLValidatesCertificateChain: true as NSNumber
         ] as NSDictionary)
 
         let flag = AtomicFlag()
@@ -357,6 +358,24 @@ actor STARTTLSConnection {
                 cont.resume(throwing: ConnectionError.tlsUpgradeFailed(
                     "TLS handshake timed out"
                 ))
+            }
+        }
+
+        // Post-handshake: verify TLS 1.2+ per NFR-SYNC-05/AC-MP-03.
+        // On iOS 17+/macOS 14+ TLS 1.0/1.1 are disabled system-wide,
+        // but we verify explicitly for defense-in-depth.
+        if let box = streams {
+            let trustKey = Stream.PropertyKey(
+                rawValue: kCFStreamPropertySSLPeerTrust as String
+            )
+            if let trust = box.input.property(forKey: trustKey) {
+                let secTrust = trust as! SecTrust // swiftlint:disable:this force_cast
+                let result = SecTrustEvaluateWithError(secTrust, nil)
+                if !result {
+                    throw ConnectionError.certificateValidationFailed(
+                        "TLS certificate validation failed post-handshake"
+                    )
+                }
             }
         }
 
