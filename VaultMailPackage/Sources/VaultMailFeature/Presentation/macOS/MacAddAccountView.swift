@@ -16,6 +16,8 @@ struct MacAddAccountView: View {
     let onAccountAdded: (Account) -> Void
     let onCancel: () -> Void
 
+    @Environment(\.dismiss) private var dismiss
+
     // MARK: - State
 
     @State private var currentStep: Step = .providerChoice
@@ -486,6 +488,7 @@ struct MacAddAccountView: View {
             defer { isDiscovering = false }
             do {
                 let account = try await manageAccounts.addAccountViaOAuth()
+                dismiss()
                 onAccountAdded(account)
             } catch let error as OAuthError {
                 if case .authenticationCancelled = error { return }
@@ -515,6 +518,7 @@ struct MacAddAccountView: View {
                     password: password,
                     providerConfig: provider
                 )
+                dismiss()
                 onAccountAdded(account)
             } catch let error as AccountError {
                 switch error {
@@ -578,6 +582,7 @@ struct MacAddAccountView: View {
                     providerConfig: providerConfig,
                     skipValidation: true  // Connection already tested above
                 )
+                dismiss()
                 onAccountAdded(account)
             } catch let error as AccountError {
                 switch error {
