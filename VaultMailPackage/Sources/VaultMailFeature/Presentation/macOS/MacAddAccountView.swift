@@ -564,10 +564,15 @@ struct MacAddAccountView: View {
     private func saveManualAccount() {
         isSaving = true
         errorMessage = nil
+        print("[MacAddAccount] saveManualAccount started")
 
         Task {
-            defer { isSaving = false }
+            defer {
+                isSaving = false
+                print("[MacAddAccount] saveManualAccount defer — isSaving = false")
+            }
             do {
+                print("[MacAddAccount] creating provider config...")
                 let providerConfig = ProviderRegistry.customProvider(
                     imapHost: imapHost,
                     imapPort: Int(imapPort) ?? 993,
@@ -576,15 +581,20 @@ struct MacAddAccountView: View {
                     smtpPort: Int(smtpPort) ?? 587,
                     smtpSecurity: smtpSecurity
                 )
+                print("[MacAddAccount] calling addAccountViaAppPassword (skipValidation=true)...")
                 let account = try await manageAccounts.addAccountViaAppPassword(
                     email: email,
                     password: manualPassword,
                     providerConfig: providerConfig,
                     skipValidation: true  // Connection already tested above
                 )
+                print("[MacAddAccount] account created: \(account.email), calling dismiss...")
                 dismiss()
+                print("[MacAddAccount] dismiss() called, calling onAccountAdded...")
                 onAccountAdded(account)
+                print("[MacAddAccount] onAccountAdded completed")
             } catch let error as AccountError {
+                print("[MacAddAccount] AccountError: \(error)")
                 switch error {
                 case .duplicateAccount(let email):
                     errorMessage = "\(email) is already added."
@@ -592,6 +602,7 @@ struct MacAddAccountView: View {
                     errorMessage = "Failed to save account. Please try again."
                 }
             } catch {
+                print("[MacAddAccount] unexpected error: \(error)")
                 errorMessage = "An unexpected error occurred. Please try again."
             }
         }
