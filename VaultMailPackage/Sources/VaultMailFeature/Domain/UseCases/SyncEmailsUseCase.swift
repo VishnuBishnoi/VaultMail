@@ -459,18 +459,17 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
         }
         folder.uidValidity = Int(serverUidValidity)
 
-        // Compute search date
-        let searchDate: Date
+        // Search for UIDs.
+        // On first sync (lastSyncDate == nil), fetch ALL UIDs so folders like
+        // Sent/Drafts show their complete contents regardless of age.
+        // On subsequent syncs, use incremental date-based search.
+        let allUIDs: [UInt32]
         if let lastSync = folder.lastSyncDate {
-            searchDate = lastSync
+            allUIDs = try await client.searchUIDs(since: lastSync)
         } else {
-            searchDate = Date().addingTimeInterval(
-                -TimeInterval(account.syncWindowDays * 86400)
-            )
+            NSLog("[Sync] First sync for '\(folder.imapPath)' — fetching all UIDs")
+            allUIDs = try await client.searchAllUIDs()
         }
-
-        // Search for UIDs since last sync
-        let allUIDs = try await client.searchUIDs(since: searchDate)
         guard !allUIDs.isEmpty else {
             folder.totalCount = Int(messageCount)
             folder.lastSyncDate = Date()

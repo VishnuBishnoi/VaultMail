@@ -224,6 +224,13 @@ public protocol IMAPClientProtocol: Sendable {
     /// Spec ref: FR-SYNC-01 step 2
     func searchUIDs(since date: Date) async throws -> [UInt32]
 
+    /// Searches for ALL message UIDs in the currently selected folder.
+    ///
+    /// Maps to IMAP `UID SEARCH ALL` command.
+    /// Used for first-time folder sync to fetch the complete folder contents
+    /// regardless of date, ensuring folders like Sent/Drafts show all messages.
+    func searchAllUIDs() async throws -> [UInt32]
+
     /// Fetches email headers for specified UIDs in the currently selected folder.
     ///
     /// Maps to IMAP `FETCH <UIDs> (ENVELOPE FLAGS BODYSTRUCTURE RFC822.SIZE)`.

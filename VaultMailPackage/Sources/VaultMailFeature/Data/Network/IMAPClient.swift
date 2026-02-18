@@ -200,6 +200,15 @@ public actor IMAPClient: IMAPClientProtocol {
         return IMAPResponseParser.parseSearchResponse(from: responses)
     }
 
+    /// Searches for ALL message UIDs in the currently selected folder.
+    ///
+    /// Maps to IMAP `UID SEARCH ALL`. Used for first-time folder sync
+    /// to fetch complete folder contents regardless of date.
+    public func searchAllUIDs() async throws -> [UInt32] {
+        let responses = try await session.execute("UID SEARCH ALL")
+        return IMAPResponseParser.parseSearchResponse(from: responses)
+    }
+
     /// Fetches email headers for specified UIDs.
     ///
     /// Uses `BODY.PEEK[HEADER.FIELDS (...)]` to fetch specific headers without

@@ -19,6 +19,7 @@ final class MockIMAPClient: IMAPClientProtocol, @unchecked Sendable {
     private(set) var listFoldersCallCount = 0
     private(set) var selectFolderCallCount = 0
     private(set) var searchUIDsCallCount = 0
+    private(set) var searchAllUIDsCallCount = 0
     private(set) var fetchHeadersCallCount = 0
     private(set) var fetchBodiesCallCount = 0
     private(set) var fetchFlagsCallCount = 0
@@ -60,6 +61,9 @@ final class MockIMAPClient: IMAPClientProtocol, @unchecked Sendable {
     var listFoldersResult: Result<[IMAPFolderInfo], IMAPError> = .success([])
     var selectFolderResult: Result<(uidValidity: UInt32, messageCount: UInt32), IMAPError> = .success((1, 0))
     var searchUIDsResult: Result<[UInt32], IMAPError> = .success([])
+    /// When nil, falls back to `searchUIDsResult` for backward compatibility
+    /// with existing tests that only configure `searchUIDsResult`.
+    var searchAllUIDsResult: Result<[UInt32], IMAPError>?
     var fetchHeadersResult: Result<[IMAPEmailHeader], IMAPError> = .success([])
     var fetchBodiesResult: Result<[IMAPEmailBody], IMAPError> = .success([])
     var fetchFlagsResult: Result<[UInt32: [String]], IMAPError> = .success([:])
@@ -146,6 +150,13 @@ final class MockIMAPClient: IMAPClientProtocol, @unchecked Sendable {
         searchUIDsCallCount += 1
         lastSearchDate = date
         return try searchUIDsResult.get()
+    }
+
+    func searchAllUIDs() async throws -> [UInt32] {
+        searchAllUIDsCallCount += 1
+        // Fall back to searchUIDsResult if searchAllUIDsResult was not explicitly set.
+        // This preserves backward compatibility with tests that only configure searchUIDsResult.
+        return try (searchAllUIDsResult ?? searchUIDsResult).get()
     }
 
     func fetchHeaders(uids: [UInt32]) async throws -> [IMAPEmailHeader] {

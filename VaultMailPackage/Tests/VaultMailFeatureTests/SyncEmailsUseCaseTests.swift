@@ -220,11 +220,14 @@ struct SyncEmailsUseCaseTests {
         let useCase = sut
         try await useCase.syncAccount(accountId: account.id)
 
-        // Only Inbox should be saved (All Mail is not syncable)
-        // The folder save count tells us how many folders were synced
+        // All Mail is saved as a reference-only folder (so archive actions work)
+        // but should NOT have its emails synced — only SELECT is called on Inbox.
         let savedFolders = emailRepo.folders
         let allMailFolder = savedFolders.first(where: { $0.imapPath == "[Gmail]/All Mail" })
-        #expect(allMailFolder == nil)
+        #expect(allMailFolder != nil, "All Mail saved as reference-only folder for archive actions")
+
+        // Verify All Mail was NOT selected for email sync (only INBOX was selected)
+        #expect(mockIMAPClient.lastSelectedPath == "INBOX")
     }
 
     // MARK: - Email Sync
