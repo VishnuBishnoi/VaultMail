@@ -390,10 +390,12 @@ actor STARTTLSConnection {
     /// - Throws: `ConnectionError.connectionFailed` if the write fails.
     func send(_ data: Data) async throws {
         guard let box = streams else {
+            _connectedFlag.set(false)
             throw ConnectionError.connectionFailed("Not connected")
         }
 
         let flag = AtomicFlag()
+        let connectedFlag = _connectedFlag
         let effectiveTimeout = timeout
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
@@ -415,6 +417,7 @@ actor STARTTLSConnection {
 
                     if written < 0 {
                         guard flag.trySet() else { return }
+                        connectedFlag.set(false)
                         let error = box.output.streamError
                         cont.resume(throwing: ConnectionError.connectionFailed(
                             "Write failed: \(error?.localizedDescription ?? "unknown error")"
@@ -444,11 +447,13 @@ actor STARTTLSConnection {
     /// - Returns: The data read from the connection.
     func receiveData(timeout readTimeout: TimeInterval? = nil) async throws -> Data {
         guard let box = streams else {
+            _connectedFlag.set(false)
             throw ConnectionError.connectionFailed("Not connected")
         }
 
         let effectiveTimeout = readTimeout ?? timeout
         let flag = AtomicFlag()
+        let connectedFlag = _connectedFlag
 
         let data: Data = try await withCheckedThrowingContinuation { cont in
             self.streamQueue.asyncAfter(deadline: .now() + effectiveTimeout) {
@@ -470,14 +475,16 @@ actor STARTTLSConnection {
                             return
                         } else if bytesRead < 0 {
                             guard flag.trySet() else { return }
+                            connectedFlag.set(false)
                             let error = box.input.streamError
                             cont.resume(throwing: ConnectionError.connectionFailed(
                                 error?.localizedDescription ?? "Read failed"
                             ))
                             return
                         } else {
-                            // bytesRead == 0 means EOF
+                            // bytesRead == 0 means EOF — server closed connection
                             guard flag.trySet() else { return }
+                            connectedFlag.set(false)
                             cont.resume(throwing: ConnectionError.connectionFailed(
                                 "Connection closed by server"
                             ))
@@ -487,6 +494,7 @@ actor STARTTLSConnection {
 
                     if let error = box.input.streamError {
                         guard flag.trySet() else { return }
+                        connectedFlag.set(false)
                         cont.resume(throwing: ConnectionError.connectionFailed(
                             error.localizedDescription
                         ))
