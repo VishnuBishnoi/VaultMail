@@ -545,4 +545,123 @@ struct ConnectionPoolTests {
     func maxConnectionsConstant() {
         #expect(AppConstants.imapMaxConnectionsPerAccount == 5)
     }
+
+    @Test("Default max global connections is 25")
+    func maxGlobalConnectionsConstant() {
+        #expect(AppConstants.imapMaxGlobalConnections == 25)
+    }
+
+    // MARK: - Global Connection Cap
+
+    /// Creates a pool with a global connection limit for testing.
+    private func makeGlobalPool(
+        maxPerAccount: Int = 5,
+        maxGlobal: Int = 3,
+        waitTimeout: TimeInterval = 5
+    ) -> ConnectionPool {
+        ConnectionPool(
+            maxConnectionsPerAccount: maxPerAccount,
+            maxGlobalConnections: maxGlobal,
+            waitTimeout: waitTimeout,
+            connectionFactory: Self.testFactory
+        )
+    }
+
+    @Test("Global cap blocks checkout when total across accounts reaches limit")
+    func globalCapBlocksCheckout() async throws {
+        // max 5 per account, but only 3 globally
+        let pool = makeGlobalPool(maxPerAccount: 5, maxGlobal: 3, waitTimeout: 0.3)
+
+        // Checkout 1 from each of 3 accounts = 3 total = at global cap
+        let c1 = try await pool.checkout(
+            accountId: "a1", host: "h", port: 993, security: .tls,
+            credential: .xoauth2(email: "a1@x.com", accessToken: "t")
+        )
+        let c2 = try await pool.checkout(
+            accountId: "a2", host: "h", port: 993, security: .tls,
+            credential: .xoauth2(email: "a2@x.com", accessToken: "t")
+        )
+        let c3 = try await pool.checkout(
+            accountId: "a3", host: "h", port: 993, security: .tls,
+            credential: .xoauth2(email: "a3@x.com", accessToken: "t")
+        )
+
+        let total = await pool.totalConnectionCount()
+        #expect(total == 3)
+
+        // 4th checkout from a4 should block (per-account has room, but global is full)
+        // Because we have a short wait timeout and no one returns, this will
+        // eventually time out at the per-account waiter stage
+        let blockedTask = Task<IMAPClient?, Error> {
+            try await pool.checkout(
+                accountId: "a4", host: "h", port: 993, security: .tls,
+                credential: .xoauth2(email: "a4@x.com", accessToken: "t")
+            )
+        }
+
+        // Give it time to hit the global waiter
+        try await Task.sleep(for: .milliseconds(100))
+
+        // Return one connection — should unblock the waiter
+        await pool.checkin(c1, accountId: "a1")
+
+        // The blocked task should now succeed
+        let result = try await blockedTask.value
+        #expect(result != nil)
+
+        // Clean up
+        await pool.checkin(c2, accountId: "a2")
+        await pool.checkin(c3, accountId: "a3")
+        if let r = result { await pool.checkin(r, accountId: "a4") }
+        await pool.shutdown()
+    }
+
+    @Test("Global cap allows checkout when under limit")
+    func globalCapAllowsUnderLimit() async throws {
+        let pool = makeGlobalPool(maxPerAccount: 5, maxGlobal: 10)
+
+        // Checkout from 3 different accounts = 3 total, well under 10
+        let c1 = try await pool.checkout(
+            accountId: "a1", host: "h", port: 993, security: .tls,
+            credential: .xoauth2(email: "a1@x.com", accessToken: "t")
+        )
+        let c2 = try await pool.checkout(
+            accountId: "a2", host: "h", port: 993, security: .tls,
+            credential: .xoauth2(email: "a2@x.com", accessToken: "t")
+        )
+        let c3 = try await pool.checkout(
+            accountId: "a3", host: "h", port: 993, security: .tls,
+            credential: .xoauth2(email: "a3@x.com", accessToken: "t")
+        )
+
+        let total = await pool.totalConnectionCount()
+        #expect(total == 3)
+
+        // Clean up
+        await pool.checkin(c1, accountId: "a1")
+        await pool.checkin(c2, accountId: "a2")
+        await pool.checkin(c3, accountId: "a3")
+    }
+
+    @Test("totalConnectionCount returns correct count across accounts")
+    func totalConnectionCountAccuracy() async throws {
+        let pool = makeGlobalPool(maxPerAccount: 5, maxGlobal: 10)
+
+        #expect(await pool.totalConnectionCount() == 0)
+
+        let c1 = try await pool.checkout(
+            accountId: "a1", host: "h", port: 993, security: .tls,
+            credential: .xoauth2(email: "a1@x.com", accessToken: "t")
+        )
+        #expect(await pool.totalConnectionCount() == 1)
+
+        let c2 = try await pool.checkout(
+            accountId: "a2", host: "h", port: 993, security: .tls,
+            credential: .xoauth2(email: "a2@x.com", accessToken: "t")
+        )
+        #expect(await pool.totalConnectionCount() == 2)
+
+        await pool.checkin(c1, accountId: "a1")
+        await pool.checkin(c2, accountId: "a2")
+    }
 }

@@ -512,11 +512,46 @@ struct MacAddAccountView: View {
 
         Task {
             defer { isAddingAccount = false }
+
+            // Step 1: Run 4-step connection test (IMAP + SMTP)
+            let stream = connectionTestUseCase.testConnection(
+                imapHost: provider.imapHost,
+                imapPort: provider.imapPort,
+                imapSecurity: provider.imapSecurity,
+                smtpHost: provider.smtpHost,
+                smtpPort: provider.smtpPort,
+                smtpSecurity: provider.smtpSecurity,
+                email: email,
+                password: password
+            )
+
+            var finalResult = ConnectionTestResult()
+            for await update in stream {
+                finalResult = update
+            }
+
+            guard finalResult.allPassed else {
+                if case .failure = finalResult.imapConnect {
+                    errorMessage = "IMAP connection failed. Check server settings."
+                } else if case .failure = finalResult.imapAuth {
+                    errorMessage = "IMAP authentication failed. Check your app password."
+                } else if case .failure = finalResult.smtpConnect {
+                    errorMessage = "SMTP connection failed. Check server settings."
+                } else if case .failure = finalResult.smtpAuth {
+                    errorMessage = "SMTP authentication failed. Check your app password."
+                } else {
+                    errorMessage = "Connection test did not complete. Please try again."
+                }
+                return
+            }
+
+            // Step 2: Save the account (skip re-validation — already tested)
             do {
                 let account = try await manageAccounts.addAccountViaAppPassword(
                     email: email,
                     password: password,
-                    providerConfig: provider
+                    providerConfig: provider,
+                    skipValidation: true
                 )
                 onAccountAdded(account)
                 dismiss()
@@ -524,8 +559,6 @@ struct MacAddAccountView: View {
                 switch error {
                 case .duplicateAccount(let email):
                     errorMessage = "\(email) is already added."
-                case .imapValidationFailed:
-                    errorMessage = "Couldn't connect to \(provider.displayName). Check your app password and try again."
                 default:
                     errorMessage = "Failed to add account. Please try again."
                 }

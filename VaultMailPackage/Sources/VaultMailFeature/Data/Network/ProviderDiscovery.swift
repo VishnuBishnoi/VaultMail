@@ -154,6 +154,10 @@ public actor ProviderDiscovery {
         let imapSecurity = Self.mapSocketType(incoming.socketType)
         let smtpSecurity = Self.mapSocketType(outgoing.socketType)
 
+        // Determine auth method from ISPDB XML <authentication> element.
+        // Use the incoming (IMAP) server's auth as the primary signal.
+        let authMethod = Self.mapAuthentication(incoming.authentication)
+
         return DiscoveredConfig(
             imapHost: incoming.hostname,
             imapPort: incoming.port,
@@ -161,7 +165,7 @@ public actor ProviderDiscovery {
             smtpHost: outgoing.hostname,
             smtpPort: outgoing.port,
             smtpSecurity: smtpSecurity,
-            authMethod: .plain,
+            authMethod: authMethod,
             source: .ispdb,
             displayName: parser.displayName
         )
@@ -172,6 +176,24 @@ public actor ProviderDiscovery {
         case "SSL", "TLS": return .tls
         case "STARTTLS": return .starttls
         default: return .tls
+        }
+    }
+
+    /// Maps an ISPDB `<authentication>` value to `AuthMethod`.
+    ///
+    /// Mozilla ISPDB uses values like "OAuth2", "password-cleartext",
+    /// "password-encrypted", etc. We map OAuth variants to `.xoauth2`
+    /// and everything else to `.plain` (safe default for app-password flows).
+    ///
+    /// Spec ref: FR-MPROV-08 (ISPDB auth parsing)
+    internal static func mapAuthentication(_ authentication: String?) -> AuthMethod {
+        switch authentication?.lowercased() {
+        case "oauth2", "xoauth2":
+            return .xoauth2
+        case "password-cleartext", "plain", "password-encrypted", "cram-md5", .none:
+            return .plain
+        default:
+            return .plain
         }
     }
 
@@ -341,6 +363,8 @@ final class ISPDBXMLParser: NSObject, XMLParserDelegate {
         var hostname: String = ""
         var port: Int = 0
         var socketType: String = ""
+        /// Raw `<authentication>` value from ISPDB XML (e.g., "OAuth2", "password-cleartext").
+        var authentication: String?
     }
 
     private let data: Data
@@ -413,6 +437,8 @@ final class ISPDBXMLParser: NSObject, XMLParserDelegate {
                 currentServer.port = Int(trimmed) ?? 0
             case "socketType":
                 currentServer.socketType = trimmed
+            case "authentication":
+                currentServer.authentication = trimmed
             default:
                 break
             }

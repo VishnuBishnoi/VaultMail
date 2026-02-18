@@ -201,6 +201,7 @@ struct ProviderSelectionView: View {
             AppPasswordEntryView(
                 email: email,
                 providerConfig: providerConfig,
+                connectionTestUseCase: connectionTestUseCase,
                 manageAccounts: manageAccounts,
                 onAccountAdded: { account in
                     navigationDestination = nil

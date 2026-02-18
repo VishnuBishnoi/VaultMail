@@ -17,6 +17,9 @@ public final class OAuthManager: NSObject, OAuthManagerProtocol, ASWebAuthentica
     private let providerConfig: OAuthProviderConfig
     private let urlSession: URLSession
 
+    /// Which provider this OAuth manager is configured for.
+    public nonisolated var provider: ProviderIdentifier { providerConfig.provider }
+
     /// Convenience accessor for the client ID.
     private var clientId: String { providerConfig.clientId }
 

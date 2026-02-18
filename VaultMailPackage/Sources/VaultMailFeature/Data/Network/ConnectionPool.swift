@@ -50,11 +50,20 @@ public actor ConnectionPool {
     /// Connections indexed by account ID.
     private var pools: [String: [PoolEntry]] = [:]
 
-    /// Callers waiting for a connection, indexed by account ID (FIFO order).
+    /// Callers waiting for a per-account connection, indexed by account ID (FIFO order).
     private var waiters: [String: [Waiter]] = [:]
+
+    /// Callers waiting for a global connection slot to open up (FIFO).
+    private var globalWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// Maximum connections per account (FR-SYNC-09: 5 for Gmail).
     private let maxConnectionsPerAccount: Int
+
+    /// Maximum total connections across all accounts.
+    ///
+    /// Prevents device resource exhaustion when many accounts are configured.
+    /// When reached, callers are queued (same as per-account exhaustion).
+    private let maxGlobalConnections: Int
 
     /// Per-account connection limit overrides (FR-MPROV-13).
     ///
@@ -74,15 +83,18 @@ public actor ConnectionPool {
     ///
     /// - Parameters:
     ///   - maxConnectionsPerAccount: Per-account connection cap (FR-SYNC-09: 5).
+    ///   - maxGlobalConnections: Total connection cap across all accounts (default: 25).
     ///   - waitTimeout: Seconds to wait when pool is exhausted before timing out.
     ///   - connectionFactory: Optional factory for creating connections.
     ///     Defaults to creating a real `IMAPClient` and calling `connect`.
     public init(
         maxConnectionsPerAccount: Int = AppConstants.imapMaxConnectionsPerAccount,
+        maxGlobalConnections: Int = AppConstants.imapMaxGlobalConnections,
         waitTimeout: TimeInterval = AppConstants.imapConnectionTimeout,
         connectionFactory: ConnectionFactory? = nil
     ) {
         self.maxConnectionsPerAccount = maxConnectionsPerAccount
+        self.maxGlobalConnections = maxGlobalConnections
         self.waitTimeout = waitTimeout
         self.connectionFactory = connectionFactory ?? { host, port, security, credential in
             let client = IMAPClient()
@@ -173,7 +185,18 @@ public actor ConnectionPool {
                 continue
             }
 
-            // 2. Create a new connection if under the limit
+            // 2a. Check global limit before creating a new connection
+            let totalConnections = pools.values.reduce(0) { $0 + $1.count }
+            if entries.count < limit && totalConnections >= maxGlobalConnections {
+                // Per-account has room but global limit is reached — wait for a global slot
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    self.globalWaiters.append(continuation)
+                }
+                // After being woken, retry from the top of the while loop
+                continue
+            }
+
+            // 2b. Create a new connection if under both per-account and global limits
             if entries.count < limit {
                 let client = try await connectionFactory(host, port, security, credential)
                 entries.append(PoolEntry(client: client, isCheckedOut: true))
@@ -181,7 +204,7 @@ public actor ConnectionPool {
                 return client
             }
 
-            // 3. Pool exhausted — queue until a connection becomes available (FR-SYNC-09)
+            // 3. Per-account pool exhausted — queue until a connection becomes available (FR-SYNC-09)
             let waiterId = UUID()
             let timeout = self.waitTimeout
 
@@ -203,7 +226,8 @@ public actor ConnectionPool {
     ///
     /// If callers are queued (waiting for a connection), the first waiter
     /// receives this connection immediately (FIFO). Otherwise the connection
-    /// is marked idle in the pool.
+    /// is marked idle in the pool. Also wakes any global waiters that were
+    /// blocked by the global connection limit.
     ///
     /// - Parameters:
     ///   - client: The `IMAPClient` to return
@@ -225,9 +249,26 @@ public actor ConnectionPool {
                 // No waiters — mark as available
                 entries[i].isCheckedOut = false
                 pools[accountId] = entries
+
+                // Wake global waiters: if other accounts have queued callers
+                // that were blocked by the global limit, signal them to retry.
+                wakeGlobalWaiters()
                 return
             }
         }
+    }
+
+    /// Signals all global waiters that a slot may be available.
+    ///
+    /// Called after a connection is returned to the pool. Waiters from
+    /// other accounts that were blocked by the global limit will be
+    /// resumed with `IMAPError.connectionPoolGlobalRetry` so their
+    /// `checkout()` call site can retry.
+    private func wakeGlobalWaiters() {
+        guard !globalWaiters.isEmpty else { return }
+        // Resume the oldest global waiter (FIFO)
+        let waiter = globalWaiters.removeFirst()
+        waiter.resume(returning: ())
     }
 
     // MARK: - Timeout
@@ -272,15 +313,23 @@ public actor ConnectionPool {
     /// Disconnects all connections across all accounts.
     ///
     /// Any queued callers across all accounts are resumed with
-    /// `IMAPError.operationCancelled`.
+    /// `IMAPError.operationCancelled`. Global waiters are also woken
+    /// so they can exit their retry loops.
     public func shutdown() async {
-        // Cancel all waiters across all accounts
+        // Cancel all per-account waiters
         for (_, accountWaiters) in waiters {
             for waiter in accountWaiters {
                 waiter.continuation.resume(throwing: IMAPError.operationCancelled)
             }
         }
         waiters.removeAll()
+
+        // Wake all global waiters (they'll find the pool shut down and retry
+        // will hit per-account waiters that are already cancelled)
+        for continuation in globalWaiters {
+            continuation.resume(returning: ())
+        }
+        globalWaiters.removeAll()
 
         for accountId in pools.keys {
             if let entries = pools[accountId] {
@@ -307,5 +356,10 @@ public actor ConnectionPool {
     /// Returns the number of callers currently waiting for a connection.
     public func waiterCount(for accountId: String) -> Int {
         waiters[accountId]?.count ?? 0
+    }
+
+    /// Returns the total number of connections across all accounts.
+    public func totalConnectionCount() -> Int {
+        pools.values.reduce(0) { $0 + $1.count }
     }
 }

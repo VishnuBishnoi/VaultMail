@@ -76,6 +76,30 @@ struct ProviderDiscoveryTests {
     </clientConfig>
     """
 
+    private static let oauth2ISPDBXML = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <clientConfig version="1.1">
+      <emailProvider id="gmail.com">
+        <domain>gmail.com</domain>
+        <displayName>Google Mail</displayName>
+        <incomingServer type="imap">
+          <hostname>imap.gmail.com</hostname>
+          <port>993</port>
+          <socketType>SSL</socketType>
+          <authentication>OAuth2</authentication>
+          <username>%EMAILADDRESS%</username>
+        </incomingServer>
+        <outgoingServer type="smtp">
+          <hostname>smtp.gmail.com</hostname>
+          <port>465</port>
+          <socketType>SSL</socketType>
+          <authentication>OAuth2</authentication>
+          <username>%EMAILADDRESS%</username>
+        </outgoingServer>
+      </emailProvider>
+    </clientConfig>
+    """
+
     private static let incompleteISPDBXML = """
     <?xml version="1.0" encoding="UTF-8"?>
     <clientConfig version="1.1">
@@ -364,5 +388,79 @@ struct ProviderDiscoveryTests {
         #expect(config.authMethod == .xoauth2)
         #expect(config.source == .staticRegistry)
         #expect(config.displayName == "Gmail")
+    }
+
+    // MARK: - ISPDB Authentication Parsing (F2)
+
+    @Test("ISPDBXMLParser extracts authentication element")
+    func parseISPDBXML_Authentication() {
+        let data = Self.fastmailISPDBXML.data(using: .utf8)!
+        let parser = ISPDBXMLParser(data: data)
+
+        #expect(parser.parse() == true)
+        #expect(parser.incomingServer?.authentication == "password-cleartext")
+        #expect(parser.outgoingServer?.authentication == "password-cleartext")
+    }
+
+    @Test("ISPDBXMLParser extracts OAuth2 authentication")
+    func parseISPDBXML_OAuth2Authentication() {
+        let data = Self.oauth2ISPDBXML.data(using: .utf8)!
+        let parser = ISPDBXMLParser(data: data)
+
+        #expect(parser.parse() == true)
+        #expect(parser.incomingServer?.authentication == "OAuth2")
+        #expect(parser.outgoingServer?.authentication == "OAuth2")
+    }
+
+    @Test("ISPDB OAuth2 auth maps to xoauth2 AuthMethod")
+    func discoverISPDB_OAuth2AuthMethod() async {
+        let session = MockURLSession()
+        let url = "https://autoconfig.thunderbird.net/v1.1/oauth-provider.com"
+        let httpResponse = HTTPURLResponse(
+            url: URL(string: url)!, statusCode: 200, httpVersion: nil, headerFields: nil
+        )!
+        session.responses[url] = (Self.oauth2ISPDBXML.data(using: .utf8)!, httpResponse)
+
+        let sut = ProviderDiscovery(urlSession: session)
+        let result = await sut.discover(for: "user@oauth-provider.com")
+
+        #expect(result?.source == .ispdb)
+        #expect(result?.authMethod == .xoauth2)
+    }
+
+    @Test("ISPDB password-cleartext auth maps to plain AuthMethod")
+    func discoverISPDB_PlainAuthMethod() async {
+        let session = MockURLSession()
+        let url = "https://autoconfig.thunderbird.net/v1.1/fastmail.com"
+        let httpResponse = HTTPURLResponse(
+            url: URL(string: url)!, statusCode: 200, httpVersion: nil, headerFields: nil
+        )!
+        session.responses[url] = (Self.fastmailISPDBXML.data(using: .utf8)!, httpResponse)
+
+        let sut = ProviderDiscovery(urlSession: session)
+        let result = await sut.discover(for: "user@fastmail.com")
+
+        #expect(result?.source == .ispdb)
+        #expect(result?.authMethod == .plain)
+    }
+
+    @Test("mapAuthentication handles all known ISPDB auth values")
+    func mapAuthenticationValues() {
+        // OAuth variants → .xoauth2
+        #expect(ProviderDiscovery.mapAuthentication("OAuth2") == .xoauth2)
+        #expect(ProviderDiscovery.mapAuthentication("oauth2") == .xoauth2)
+        #expect(ProviderDiscovery.mapAuthentication("XOAUTH2") == .xoauth2)
+        #expect(ProviderDiscovery.mapAuthentication("xoauth2") == .xoauth2)
+
+        // Password variants → .plain
+        #expect(ProviderDiscovery.mapAuthentication("password-cleartext") == .plain)
+        #expect(ProviderDiscovery.mapAuthentication("plain") == .plain)
+        #expect(ProviderDiscovery.mapAuthentication("password-encrypted") == .plain)
+        #expect(ProviderDiscovery.mapAuthentication("CRAM-MD5") == .plain)
+
+        // nil/unknown → .plain (safe default)
+        #expect(ProviderDiscovery.mapAuthentication(nil) == .plain)
+        #expect(ProviderDiscovery.mapAuthentication("unknown-method") == .plain)
+        #expect(ProviderDiscovery.mapAuthentication("") == .plain)
     }
 }

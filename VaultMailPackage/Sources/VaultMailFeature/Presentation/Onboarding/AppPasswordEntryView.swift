@@ -10,6 +10,7 @@ struct AppPasswordEntryView: View {
 
     @State var email: String
     let providerConfig: ProviderConfiguration
+    let connectionTestUseCase: ConnectionTestUseCaseProtocol
     let manageAccounts: ManageAccountsUseCaseProtocol
     let onAccountAdded: (Account) -> Void
     let onCancel: () -> Void
@@ -17,6 +18,7 @@ struct AppPasswordEntryView: View {
     @State private var password = ""
     @State private var isAdding = false
     @State private var errorMessage: String?
+    @State private var testResult: ConnectionTestResult?
 
     var body: some View {
         NavigationStack {
@@ -132,22 +134,61 @@ struct AppPasswordEntryView: View {
     private func addAccount() {
         isAdding = true
         errorMessage = nil
+        testResult = nil
 
         Task {
             defer { isAdding = false }
+
+            // Step 1: Run 4-step connection test (IMAP + SMTP)
+            let stream = connectionTestUseCase.testConnection(
+                imapHost: providerConfig.imapHost,
+                imapPort: providerConfig.imapPort,
+                imapSecurity: providerConfig.imapSecurity,
+                smtpHost: providerConfig.smtpHost,
+                smtpPort: providerConfig.smtpPort,
+                smtpSecurity: providerConfig.smtpSecurity,
+                email: email,
+                password: password
+            )
+
+            var finalResult = ConnectionTestResult()
+            for await update in stream {
+                finalResult = update
+                testResult = update
+            }
+
+            // Check if all tests passed
+            guard finalResult.allPassed else {
+                // Provide specific error message based on which step failed
+                if case .failure(let msg) = finalResult.imapConnect {
+                    errorMessage = "IMAP connection failed: \(msg)"
+                } else if case .failure(let msg) = finalResult.imapAuth {
+                    errorMessage = "IMAP authentication failed. Check your app password."
+                    _ = msg  // suppress unused warning
+                } else if case .failure(let msg) = finalResult.smtpConnect {
+                    errorMessage = "SMTP connection failed: \(msg)"
+                } else if case .failure(let msg) = finalResult.smtpAuth {
+                    errorMessage = "SMTP authentication failed. Check your app password."
+                    _ = msg  // suppress unused warning
+                } else {
+                    errorMessage = "Connection test did not complete. Please try again."
+                }
+                return
+            }
+
+            // Step 2: Save the account (skip re-validation — already tested)
             do {
                 let account = try await manageAccounts.addAccountViaAppPassword(
                     email: email,
                     password: password,
-                    providerConfig: providerConfig
+                    providerConfig: providerConfig,
+                    skipValidation: true
                 )
                 onAccountAdded(account)
             } catch let error as AccountError {
                 switch error {
                 case .duplicateAccount(let email):
                     errorMessage = "\(email) is already added."
-                case .imapValidationFailed:
-                    errorMessage = "Couldn't connect to \(providerConfig.displayName). Please check your app password and try again."
                 default:
                     errorMessage = "Failed to add account. Please try again."
                 }

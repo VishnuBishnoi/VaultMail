@@ -119,15 +119,28 @@ public final class ManageAccountsUseCase: ManageAccountsUseCaseProtocol {
         // Step 2: Resolve authenticated user's email from access token
         let email = try await resolveEmail(token.accessToken)
 
-        // Step 3: Create account with Gmail defaults from AppConstants
-        let account = Account(
-            email: email,
-            displayName: email.components(separatedBy: "@").first ?? email,
-            imapHost: AppConstants.gmailImapHost,
-            imapPort: AppConstants.gmailImapPort,
-            smtpHost: AppConstants.gmailSmtpHost,
-            smtpPort: AppConstants.gmailSmtpPort
-        )
+        // Step 3: Create account using provider config from ProviderRegistry.
+        // The OAuthManager's `provider` tells us which provider was authenticated,
+        // so we look up server settings dynamically instead of hardcoding Gmail.
+        let providerConfig = ProviderRegistry.provider(for: oauthManager.provider)
+        let account: Account
+        if let providerConfig {
+            account = Account(
+                email: email,
+                displayName: email.components(separatedBy: "@").first ?? email,
+                providerConfig: providerConfig
+            )
+        } else {
+            // Fallback for unknown OAuth providers (shouldn't happen in practice)
+            account = Account(
+                email: email,
+                displayName: email.components(separatedBy: "@").first ?? email,
+                imapHost: AppConstants.gmailImapHost,
+                imapPort: AppConstants.gmailImapPort,
+                smtpHost: AppConstants.gmailSmtpHost,
+                smtpPort: AppConstants.gmailSmtpPort
+            )
+        }
 
         // Step 4: Store token in Keychain (never in SwiftData — AC-SEC-02)
         try await keychainManager.store(token, for: account.id)
@@ -310,6 +323,10 @@ public final class ManageAccountsUseCase: ManageAccountsUseCaseProtocol {
     // MARK: - Private
 
     /// Default email resolver that calls Google UserInfo API.
+    ///
+    /// When Outlook OAuth is implemented (OQ-01), this should be replaced with a
+    /// provider-aware resolver. Microsoft uses the `id_token` JWT claims from the
+    /// OAuth response (not a separate API call) to extract the email.
     private static let defaultEmailResolver: EmailResolver = { accessToken in
         let url = URL(string: "https://www.googleapis.com/oauth2/v3/userinfo")!
         var request = URLRequest(url: url)
