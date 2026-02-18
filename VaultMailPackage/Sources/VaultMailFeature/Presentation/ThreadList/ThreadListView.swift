@@ -296,11 +296,11 @@ struct ThreadListView: View {
         .task {
             await initialLoad()
         }
-        .onChange(of: navigationPath.count) { oldCount, newCount in
+        .onChange(of: navigationPath) { oldPath, newPath in
             // Refresh accounts when user pops back from Settings (or any pushed screen).
             // Without this, accounts added in Settings won't appear in the switcher
             // until the app is relaunched.
-            if newCount < oldCount {
+            if newPath.count < oldPath.count {
                 Task { await refreshAccounts() }
             }
         }
@@ -356,6 +356,9 @@ struct ThreadListView: View {
         switch destination {
         case .settings:
             SettingsView(manageAccounts: manageAccounts, modelManager: modelManager, aiEngineResolver: aiEngineResolver, providerDiscovery: providerDiscovery, connectionTestUseCase: connectionTestUseCase)
+                .onDisappear {
+                    Task { await refreshAccounts() }
+                }
         case .aiChat:
             if let resolver = aiEngineResolver {
                 AIChatView(engineResolver: resolver)
