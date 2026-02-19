@@ -41,6 +41,7 @@ struct ThreadListView: View {
     var connectionTestUseCase: ConnectionTestUseCaseProtocol?
 
     @Environment(UndoSendManager.self) private var undoSendManager
+    @Environment(NotificationSyncCoordinator.self) private var notificationCoordinator
 
     // MARK: - View State
 
@@ -313,6 +314,13 @@ struct ThreadListView: View {
             guard !isSyncing else { return }
             startIDLEMonitor()
         }
+        .onChange(of: notificationCoordinator.pendingThreadNavigation) { _, threadId in
+            // Deep link: navigate to thread when user taps a notification (NOTIF-17)
+            if let threadId {
+                notificationCoordinator.pendingThreadNavigation = nil
+                navigationPath.append(threadId)
+            }
+        }
         .onDisappear {
             stopIDLEMonitor()
             syncTask?.cancel()
@@ -514,6 +522,12 @@ struct ThreadListView: View {
             }
             await reloadThreads()
             runAIClassification(for: syncedEmails)
+            // Notify notification coordinator about pull-to-refresh emails (NOTIF-03)
+            await notificationCoordinator.didSyncNewEmails(
+                syncedEmails,
+                fromBackground: false,
+                activeFolderType: selectedFolder?.folderType
+            )
         }
         .accessibilityLabel("Email threads")
     }
@@ -606,7 +620,8 @@ struct ThreadListView: View {
                     thread: thread,
                     isMultiSelectMode: isMultiSelectMode,
                     isSelected: selectedThreadIds.contains(thread.id),
-                    accountColor: accountColor(for: thread)
+                    accountColor: accountColor(for: thread),
+                    isMuted: settings.mutedThreadIds.contains(thread.id)
                 )
             }
             .buttonStyle(.plain)
@@ -616,7 +631,8 @@ struct ThreadListView: View {
                     thread: thread,
                     isMultiSelectMode: isMultiSelectMode,
                     isSelected: selectedThreadIds.contains(thread.id),
-                    accountColor: accountColor(for: thread)
+                    accountColor: accountColor(for: thread),
+                    isMuted: settings.mutedThreadIds.contains(thread.id)
                 )
             }
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -653,6 +669,16 @@ struct ThreadListView: View {
                     )
                 }
                 .tint(.orange)
+
+                Button {
+                    settings.toggleMuteThread(threadId: thread.id)
+                } label: {
+                    Label(
+                        settings.mutedThreadIds.contains(thread.id) ? "Unmute" : "Mute",
+                        systemImage: settings.mutedThreadIds.contains(thread.id) ? "bell" : "bell.slash"
+                    )
+                }
+                .tint(.gray)
             }
             // Comment 7: Context menu to enter multi-select mode.
             // Note: .onLongPressGesture blocks NavigationLink tap gesture in
@@ -916,6 +942,13 @@ struct ThreadListView: View {
                     // Run AI classification on ALL synced emails
                     runAIClassification(for: syncedEmails)
 
+                    // Notify notification coordinator about new emails (NOTIF-03)
+                    await notificationCoordinator.didSyncNewEmails(
+                        syncedEmails,
+                        fromBackground: false,
+                        activeFolderType: selectedFolder?.folderType
+                    )
+
                     // Start IMAP IDLE for real-time inbox updates (FR-SYNC-03)
                     startIDLEMonitor()
                 } catch is CancellationError {
@@ -1018,6 +1051,12 @@ struct ThreadListView: View {
                             let syncedEmails = (try? await syncEmails.syncFolder(accountId: accountId, folderId: folderId)) ?? []
                             await loadThreadsAndCounts()
                             runAIClassification(for: syncedEmails)
+                            // Notify notification coordinator about IDLE-delivered emails (NOTIF-03)
+                            await notificationCoordinator.didSyncNewEmails(
+                                syncedEmails,
+                                fromBackground: false,
+                                activeFolderType: selectedFolder?.folderType
+                            )
                         }
                         retryDelay = .seconds(2) // reset on success
                     case .disconnected:
@@ -1176,6 +1215,7 @@ struct ThreadListView: View {
             if threads.isEmpty {
                 viewState = selectedCategory != nil ? .emptyFiltered : .empty
             }
+            await notificationCoordinator.didRemoveThread(threadId: thread.id)
             withAnimation {
                 actionToastMessage = "Thread archived"
                 actionToastUndoInfo = (threadId: thread.id, folderId: folderId)
@@ -1193,6 +1233,7 @@ struct ThreadListView: View {
             if threads.isEmpty {
                 viewState = selectedCategory != nil ? .emptyFiltered : .empty
             }
+            await notificationCoordinator.didRemoveThread(threadId: thread.id)
             withAnimation {
                 actionToastMessage = "Thread deleted"
                 actionToastUndoInfo = (threadId: thread.id, folderId: folderId)

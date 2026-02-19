@@ -12,6 +12,7 @@ import SwiftData
 public struct MacOSMainView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.modelContext) private var modelContext
+    @Environment(NotificationSyncCoordinator.self) private var notificationCoordinator
 
     // MARK: - Use Cases (injected from ContentView)
 
@@ -335,6 +336,13 @@ public struct MacOSMainView: View {
         .onChange(of: selectedThreadID) {
             updateCommandState()
         }
+        .onChange(of: notificationCoordinator.pendingThreadNavigation) { _, threadId in
+            // Deep link: select thread when user taps a notification (NOTIF-17)
+            if let threadId {
+                notificationCoordinator.pendingThreadNavigation = nil
+                selectedThreadID = threadId
+            }
+        }
         .onDisappear {
             idleTask?.cancel()
             syncTask?.cancel()
@@ -420,10 +428,16 @@ public struct MacOSMainView: View {
                     isSyncing = true
                     defer { isSyncing = false; syncTask = nil }
                     guard let accountId = selectedAccount?.id else { return }
-                    _ = try? await syncEmails.syncAccountInboxFirst(accountId: accountId, onInboxSynced: { _ in
+                    let syncedEmails = (try? await syncEmails.syncAccountInboxFirst(accountId: accountId, onInboxSynced: { _ in
                         await loadThreadsAndCounts()
-                    })
+                    })) ?? []
                     await loadThreadsAndCounts()
+                    // Notify notification coordinator about manual sync emails (NOTIF-03)
+                    await notificationCoordinator.didSyncNewEmails(
+                        syncedEmails,
+                        fromBackground: false,
+                        activeFolderType: selectedFolder?.folderType
+                    )
                 }
             } label: {
                 Label("Sync", systemImage: "arrow.clockwise")
@@ -606,7 +620,7 @@ public struct MacOSMainView: View {
     ///   - isSelected: If true, also updates `folders` and `selectedFolder` for the detail pane.
     private func syncSingleAccount(_ accountId: String, isSelected: Bool) async {
         do {
-            _ = try await syncEmails.syncAccountInboxFirst(
+            let syncedEmails = try await syncEmails.syncAccountInboxFirst(
                 accountId: accountId,
                 onInboxSynced: { _ in
                     if let fresh = try? await fetchThreads.fetchFolders(accountId: accountId) {
@@ -632,6 +646,12 @@ public struct MacOSMainView: View {
                 }
                 await loadThreadsAndCounts()
             }
+            // Notify notification coordinator about synced emails (NOTIF-03)
+            await notificationCoordinator.didSyncNewEmails(
+                syncedEmails,
+                fromBackground: false,
+                activeFolderType: selectedFolder?.folderType
+            )
         } catch is CancellationError {
             // cancelled
         } catch {
@@ -834,6 +854,7 @@ public struct MacOSMainView: View {
             threads.removeAll { $0.id == thread.id }
             if selectedThreadID == thread.id { advanceSelection(after: thread.id) }
             if threads.isEmpty { viewState = selectedCategory != nil ? .emptyFiltered : .empty }
+            await notificationCoordinator.didRemoveThread(threadId: thread.id)
         } catch {
             errorMessage = "Couldn't archive. Click to retry."
         }
@@ -845,6 +866,7 @@ public struct MacOSMainView: View {
             threads.removeAll { $0.id == thread.id }
             if selectedThreadID == thread.id { advanceSelection(after: thread.id) }
             if threads.isEmpty { viewState = selectedCategory != nil ? .emptyFiltered : .empty }
+            await notificationCoordinator.didRemoveThread(threadId: thread.id)
         } catch {
             errorMessage = "Couldn't delete. Click to retry."
         }
@@ -899,8 +921,14 @@ public struct MacOSMainView: View {
                     guard !Task.isCancelled else { break }
                     if case .newMail = event {
                         if let folderId = selectedFolder?.id {
-                            _ = try? await syncEmails.syncFolder(accountId: accountId, folderId: folderId)
+                            let syncedEmails = (try? await syncEmails.syncFolder(accountId: accountId, folderId: folderId)) ?? []
                             await loadThreadsAndCounts()
+                            // Notify notification coordinator about IDLE-delivered emails (NOTIF-03)
+                            await notificationCoordinator.didSyncNewEmails(
+                                syncedEmails,
+                                fromBackground: false,
+                                activeFolderType: selectedFolder?.folderType
+                            )
                         }
                         retryDelay = .seconds(2)
                     }

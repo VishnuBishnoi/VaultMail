@@ -24,13 +24,16 @@ public final class BackgroundSyncScheduler {
 
     private let syncEmails: SyncEmailsUseCaseProtocol
     private let manageAccounts: ManageAccountsUseCaseProtocol
+    private let notificationCoordinator: NotificationSyncCoordinator?
 
     public init(
         syncEmails: SyncEmailsUseCaseProtocol,
-        manageAccounts: ManageAccountsUseCaseProtocol
+        manageAccounts: ManageAccountsUseCaseProtocol,
+        notificationCoordinator: NotificationSyncCoordinator? = nil
     ) {
         self.syncEmails = syncEmails
         self.manageAccounts = manageAccounts
+        self.notificationCoordinator = notificationCoordinator
     }
 
     // MARK: - Registration
@@ -91,10 +94,16 @@ public final class BackgroundSyncScheduler {
                 let accounts = try await manageAccounts.getAccounts()
                 let activeAccounts = accounts.filter { $0.isActive }
 
+                var isFirst = true
                 for account in activeAccounts {
                     guard !Task.isCancelled else { break }
                     try await syncEmails.syncAccount(accountId: account.id)
                     NSLog("[BackgroundSync] Synced account: \(account.email)")
+                    if isFirst {
+                        notificationCoordinator?.markFirstLaunchComplete()
+                        isFirst = false
+                    }
+                    await notificationCoordinator?.didSyncNewEmails(fromBackground: true, activeFolderType: nil)
                 }
 
                 if Task.isCancelled {
