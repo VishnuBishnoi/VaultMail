@@ -1,6 +1,6 @@
 ---
 title: "Notifications — Specification"
-version: "1.0.1"
+version: "1.0.2"
 status: draft
 created: 2026-02-19
 updated: 2026-02-19
@@ -68,7 +68,7 @@ The `NotificationService` **MUST** be an `@Observable @MainActor` class, consist
 public protocol NotificationServiceProtocol {
     func requestAuthorization() async -> Bool
     func authorizationStatus() async -> NotificationAuthStatus
-    func processNewEmails(_ emails: [Email], fromBackground: Bool, activeFolderId: String?) async
+    func processNewEmails(_ emails: [Email], fromBackground: Bool, activeFolderType: String?) async
     func removeNotifications(forEmailIds emailIds: [String]) async
     func removeNotifications(forThreadId threadId: String) async
     func updateBadgeCount() async
@@ -606,11 +606,12 @@ A `NotificationSyncCoordinator` **MUST** bridge between use cases and the notifi
 public final class NotificationSyncCoordinator {
     func didMarkThreadRead(threadId: String) async
     func didRemoveThread(threadId: String) async
-    func didSyncNewEmails(_ emails: [Email], fromBackground: Bool, activeFolderId: String?) async
+    func didSyncNewEmails(_ emails: [Email], fromBackground: Bool, activeFolderType: String?) async
+    func markFirstLaunchComplete()
 }
 ```
 
-The `activeFolderId` parameter allows the service to suppress banners for emails the user is already viewing. Callers pass `selectedFolder?.id` from `ThreadListView`, or `nil` from `BackgroundSyncScheduler`.
+The `activeFolderType` parameter allows the service to suppress banners for emails the user is already viewing. Callers pass `selectedFolder?.folderType` from `ThreadListView`/`MacOSMainView`, or `nil` from `BackgroundSyncScheduler`. Using `folderType` instead of folder ID ensures correct suppression in unified inbox mode, where a single representative folder ID would not match emails from other accounts' inboxes of the same type.
 
 **Removal API**
 
@@ -631,17 +632,19 @@ Notifications **MUST** be triggered after new emails are persisted during sync.
 
 **Foreground Sync**
 
-In `ThreadListView`, after `syncEmails.syncAccountInboxFirst()` or manual refresh:
+In `ThreadListView` (iOS) or `MacOSMainView` (macOS), after foreground sync:
 1. Receive `[Email]` from sync
-2. Call `await notificationSyncCoordinator.didSyncNewEmails(emails, fromBackground: false, activeFolderId: selectedFolder?.id)`
+2. Call `await notificationSyncCoordinator.didSyncNewEmails(emails, fromBackground: false, activeFolderType: selectedFolder?.folderType)`
 
-When `activeFolderId` is non-nil, the service **SHOULD** suppress notification banners for emails whose `emailFolders` include that folder (the user is already viewing them) while still updating the badge count.
+When `activeFolderType` is non-nil, the service **SHOULD** suppress notification banners for emails whose `emailFolders` include any folder with that `folderType` (the user is already viewing that folder type). This works correctly in unified inbox mode where the user views all accounts' inboxes simultaneously but `selectedFolder` is only one representative folder. Badge count is still updated.
 
 **Anti-Flood Strategy**
 
 The spec uses a two-layer approach to prevent notification flooding on first sync and bulk operations. Neither layer depends on `folder.lastSyncDate` (which is set inside `syncFolderEmails()` before the `[Email]` array is returned to callers).
 
-1. **First-launch suppression**: `NotificationService` **MUST** maintain an `isFirstLaunch: Bool` flag, initialized to `true`. While `isFirstLaunch == true`, ALL notifications are suppressed (the user just opened the app and will see emails in the UI). Callers **MUST** call `notificationService.markFirstLaunchComplete()` after the first successful sync completes in the current app session. `ThreadListView` calls this after `syncAccountInboxFirst()` returns.
+1. **First-launch suppression**: `NotificationService` **MUST** maintain an `isFirstLaunch: Bool` flag, initialized to `true`. While `isFirstLaunch == true`, ALL notifications are suppressed (the user just opened the app and will see emails in the UI). Callers **MUST** call `notificationService.markFirstLaunchComplete()` after the first successful sync completes in the current app session. Two callers are responsible:
+   - **Foreground**: `ThreadListView` (iOS) or `MacOSMainView` (macOS) calls this after `syncAccountInboxFirst()` returns.
+   - **Background**: `BackgroundSyncScheduler` calls `notificationCoordinator?.markFirstLaunchComplete()` after the first account sync completes in `handleBackgroundSync()`. This ensures background-only app launches (where no foreground view is loaded) still clear the flag and deliver notifications for subsequent syncs in the same BGTask session.
 
 2. **Recency filter**: After first-launch suppression is lifted, the service **MUST** apply a recency check based on `email.dateReceived`:
    - When `fromBackground == true`: only notify for emails received within the last **1 hour** (`AppConstants.backgroundNotificationRecencySeconds = 3600`)
@@ -661,16 +664,22 @@ Background sync **MUST** trigger notifications for newly discovered emails.
 `BackgroundSyncScheduler.handleBackgroundSync()` calls `syncEmails.syncAccount(accountId:)` for each active account. The return value (currently discarded) **MUST** be captured and passed to the coordinator:
 
 ```swift
+var isFirstAccount = true
 for account in activeAccounts {
     guard !Task.isCancelled else { break }
     let newEmails = try await syncEmails.syncAccount(accountId: account.id)
-    await notificationCoordinator?.didSyncNewEmails(newEmails, fromBackground: true, activeFolderId: nil)
+    if isFirstAccount {
+        await notificationCoordinator?.markFirstLaunchComplete()
+        isFirstAccount = false
+    }
+    await notificationCoordinator?.didSyncNewEmails(newEmails, fromBackground: true, activeFolderType: nil)
 }
 ```
 
 **Modifications Required**
 
 - `BackgroundSyncScheduler.init()` **MUST** accept an optional `NotificationSyncCoordinator?` parameter
+- The `handleBackgroundSync()` method **MUST** call `markFirstLaunchComplete()` after the first account sync completes, ensuring background-only app launches clear the `isFirstLaunch` flag before processing notifications for subsequent accounts
 - The `handleBackgroundSync()` method **MUST** pass new emails to the coordinator after each account sync
 - This integration is iOS-only (existing `#if os(iOS)` guard)
 
@@ -695,12 +704,49 @@ case .newMail:
     let syncedEmails = try await syncEmails.syncFolder(accountId:, folderId:)
     await loadThreadsAndCounts()
     runAIClassification(for: syncedEmails)
-    await notificationSyncCoordinator.didSyncNewEmails(syncedEmails, fromBackground: false, activeFolderId: selectedFolder?.id)
+    await notificationSyncCoordinator.didSyncNewEmails(syncedEmails, fromBackground: false, activeFolderType: selectedFolder?.folderType)
 ```
 
 **Behavior**
 
-Since IDLE monitoring runs while the app is in the foreground, `fromBackground` is `false`. The `activeFolderId` is passed so the notification service can suppress banners for emails arriving in the folder the user is currently viewing, while still updating the badge.
+Since IDLE monitoring runs while the app is in the foreground, `fromBackground` is `false`. The `activeFolderType` is passed so the notification service can suppress banners for emails arriving in folders of the same type the user is currently viewing, while still updating the badge. Using `folderType` ensures correct suppression in unified inbox mode.
+
+---
+
+### 3.21a Sync Integration — MacOSMainView (NOTIF-21a)
+
+**Description**
+
+On macOS, `MacOSMainView` (`Presentation/macOS/MacOSMainView.swift`) owns foreground sync and IDLE monitoring. The notification coordinator **MUST** be integrated into all macOS sync paths, mirroring the iOS `ThreadListView` integration.
+
+**Integration Points**
+
+`MacOSMainView` performs sync in three locations, all of which **MUST** pass results to the coordinator:
+
+1. **Initial load / account change sync** — `syncSingleAccount()` (line 609) calls `syncAccountInboxFirst()`. After sync returns:
+   ```swift
+   let newEmails = try await syncEmails.syncAccountInboxFirst(accountId: account.id, ...)
+   await notificationSyncCoordinator.markFirstLaunchComplete()
+   await notificationSyncCoordinator.didSyncNewEmails(newEmails, fromBackground: false, activeFolderType: selectedFolder?.folderType)
+   ```
+
+2. **Toolbar manual refresh** — Toolbar sync button (line 417-432) triggers `syncSingleAccount()`. Same integration as above.
+
+3. **IDLE monitor** — `startIDLEMonitor()` (line 888-912) handles `.newMail` events and calls `syncFolder()` (line 902):
+   ```swift
+   case .newMail:
+       let syncedEmails = try await syncEmails.syncFolder(accountId:, folderId:)
+       await notificationSyncCoordinator.didSyncNewEmails(syncedEmails, fromBackground: false, activeFolderType: selectedFolder?.folderType)
+   ```
+
+**Modifications Required**
+
+- `MacOSMainView` **MUST** receive `NotificationSyncCoordinator` as a parameter (currently not passed)
+- `VaultMailApp.swift` line 66 **MUST** pass the coordinator when creating `MacOSMainView`
+- All three sync paths **MUST** call `didSyncNewEmails()` with `activeFolderType: selectedFolder?.folderType`
+- The first foreground sync **MUST** call `markFirstLaunchComplete()` to clear the first-launch suppression flag
+
+**Note**: On macOS, `BackgroundSyncScheduler` is not used (`#if os(iOS)` guard). IDLE monitoring runs continuously since the app is not suspended, so all sync-to-notification integration happens in `MacOSMainView`.
 
 ---
 
@@ -830,7 +876,8 @@ All `UNUserNotificationCenter` APIs (authorization, content, categories, actions
 
 **macOS-Specific Notes**
 
-- On macOS, IDLE monitoring (NOTIF-21) runs continuously since the app does not get suspended. This provides real-time notifications without any background task infrastructure.
+- On macOS, `MacOSMainView` owns all sync paths (initial load, toolbar refresh, IDLE monitoring). NOTIF-21a specifies the required notification coordinator integration for all three paths.
+- IDLE monitoring (NOTIF-21/21a) runs continuously on macOS since the app does not get suspended. This provides real-time notifications without any background task infrastructure.
 - The existing `#if os(iOS)` guard in `BackgroundSyncScheduler` already handles the platform split for background sync integration.
 - The macOS settings UI uses `MacSettingsView` → `MacNotificationsSettingsTab` (not the iOS `SettingsView`). Both platforms **MUST** share notification settings content via `NotificationSettingsContent` (see NOTIF-22).
 
@@ -929,22 +976,23 @@ Assembly order in `AppDependencies.init()`:
 6. Create `NotificationSyncCoordinator(notificationService:)`
 7. Set `UNUserNotificationCenter.current().delegate = notificationResponseHandler`
 8. Call `notificationService.registerCategories()`
-9. Pass `notificationSyncCoordinator` to `BackgroundSyncScheduler`
-10. Inject `notificationSyncCoordinator` into view hierarchy via `.environment()`
+9. Pass `notificationSyncCoordinator` to `BackgroundSyncScheduler` (iOS only)
+10. Pass `notificationSyncCoordinator` to `MacOSMainView` (macOS only)
+11. Inject `notificationSyncCoordinator` into view hierarchy via `.environment()` (for ThreadListView on iOS)
 
 ### 5.3 Data Flow — New Email Notification
 
 ```
 1. Sync detects new email → persists to SwiftData
 2. Sync returns [Email] to caller
-3. Caller calls notificationSyncCoordinator.didSyncNewEmails(emails, fromBackground:, activeFolderId:)
-4. Coordinator calls notificationService.processNewEmails(emails, fromBackground:, activeFolderId:)
+3. Caller calls notificationSyncCoordinator.didSyncNewEmails(emails, fromBackground:, activeFolderType:)
+4. Coordinator calls notificationService.processNewEmails(emails, fromBackground:, activeFolderType:)
 5. Service checks isFirstLaunch flag → if true, suppress all and return (badge only)
 6. Service applies recency filter (1h background / 5m foreground)
 7. Service runs filterPipeline.filter(emails) → qualifying [Email]
 8. For each qualifying email:
    a. Check deliveredNotificationIds (dedup)
-   b. If activeFolderId matches email's folder → skip banner, badge only
+   b. If activeFolderType matches any of email's folder types → skip banner, badge only
    c. Build content via NotificationContentBuilder.build(from:)
    d. Create UNNotificationRequest with identifier "email-\(email.id)"
    e. Post via center.add(request)
@@ -1018,9 +1066,10 @@ Assembly order in `AppDependencies.init()`:
 |---|---------------------------------------------------------------------------------|---------|---------|
 | 1 | `Shared/Services/SettingsStore.swift` | Add 6 properties, 4 helpers, 6 Keys, init logic, resetAll() | NOTIF-23 |
 | 2 | `Shared/Constants.swift` | Add notification category/action identifiers, navigation notification, recency constants | NOTIF-03 |
-| 3 | `Data/Sync/BackgroundSyncScheduler.swift` | Add `NotificationSyncCoordinator?` dependency, call after sync | NOTIF-20 |
-| 4 | **`VaultMail/VaultMailApp.swift`** (app target, not in package) | Wire all notification dependencies in AppDependencies | NOTIF-01 |
+| 3 | `Data/Sync/BackgroundSyncScheduler.swift` | Add `NotificationSyncCoordinator?` dependency, call `markFirstLaunchComplete()` + `didSyncNewEmails()` after sync | NOTIF-20 |
+| 4 | **`VaultMail/VaultMailApp.swift`** (app target, not in package) | Wire all notification dependencies in AppDependencies; pass coordinator to MacOSMainView | NOTIF-01, 21a |
 | 5 | `Presentation/ThreadList/ThreadListView.swift` | Call coordinator after IDLE/foreground sync; observe `navigateToThreadNotification`; add mute action; call `markFirstLaunchComplete()` after first sync | NOTIF-06e, 19, 21, 11 |
+| 11 | `Presentation/macOS/MacOSMainView.swift` | Add `NotificationSyncCoordinator` param; call coordinator after all 3 sync paths (initial load, toolbar refresh, IDLE); call `markFirstLaunchComplete()` after first sync | NOTIF-21a |
 | 6 | `Presentation/Settings/SettingsView.swift` | Replace inline toggles with NavigationLink | NOTIF-22 |
 | 7 | `Presentation/macOS/MacSettingsView.swift` | Replace `MacNotificationsSettingsTab` with `NotificationSettingsContent` | NOTIF-22, 24 |
 | 8 | `Presentation/ThreadList/ThreadRowView.swift` | Show muted indicator (bell.slash) | NOTIF-11 |
@@ -1036,7 +1085,7 @@ Assembly order in `AppDependencies.init()`:
 | 1 | NOTIF-01, 02, 03, 23 | Core service + protocols + SettingsStore extensions + categories | 8 new, 2 modified |
 | 2 | NOTIF-04, 05, 17 | Content builder + thread grouping + deduplication | 1 new |
 | 3 | NOTIF-07, 08, 12, 13 | Filter pipeline + P0 filters (account, spam, folder type) | 5 new |
-| 4 | NOTIF-19, 20, 21, 16 | Sync integration + badge management | 1 new, 3 modified |
+| 4 | NOTIF-19, 20, 21, 21a, 16 | Sync integration (iOS + macOS) + badge management | 1 new, 4 modified |
 | 5 | NOTIF-06, 18 | Response handler + notification removal | 1 new, 2 modified |
 | 6 | NOTIF-09, 10, 11, 14 | P1/P2 filters (category, VIP, muted, quiet hours) | 4 new, 1 modified |
 | 7 | NOTIF-22 | Settings UI | 1 new, 1 modified |
@@ -1091,8 +1140,11 @@ All tests **MUST** use Swift Testing (`@Test`, `#expect`, `#require`, `@Suite`) 
 - removeNotifications by thread ID
 - updateBadgeCount sets correct inbox-only count
 - `isFirstLaunch` suppresses all notifications before first sync completes
+- `isFirstLaunch` is cleared by BackgroundSyncScheduler after first account sync (background-only launch)
+- `isFirstLaunch` is cleared by ThreadListView/MacOSMainView after first foreground sync
 - Recency filter suppresses emails older than threshold (1h background, 5m foreground)
-- `activeFolderId` suppresses banners for actively-viewed folder (badge still updates)
+- `activeFolderType` suppresses banners for actively-viewed folder type (badge still updates)
+- `activeFolderType` correctly suppresses in unified inbox mode (matches across all accounts' inboxes)
 
 **SettingsStoreNotificationTests** (NOTIF-23)
 - VIP contact add/remove
@@ -1108,7 +1160,9 @@ All tests **MUST** use Swift Testing (`@Test`, `#expect`, `#require`, `@Suite`) 
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| First sync floods user with notifications | Poor UX, user disables notifications | Two-layer approach: `isFirstLaunch` flag suppresses ALL notifications until first sync completes; recency filter (1h background / 5m foreground) suppresses old emails on subsequent syncs. Does not depend on `folder.lastSyncDate` (which is set inside `syncFolderEmails()` before the `[Email]` return). |
+| First sync floods user with notifications | Poor UX, user disables notifications | Two-layer approach: `isFirstLaunch` flag suppresses ALL notifications until first sync completes (cleared by both foreground views and BackgroundSyncScheduler); recency filter (1h background / 5m foreground) suppresses old emails on subsequent syncs. Does not depend on `folder.lastSyncDate` (which is set inside `syncFolderEmails()` before the `[Email]` return). |
+| Background-only launch produces zero notifications | Missed notifications on iOS background wake | `BackgroundSyncScheduler` calls `markFirstLaunchComplete()` after first account sync, ensuring `isFirstLaunch` is cleared even when no foreground view is loaded |
+| Unified inbox suppression misses cross-account emails | Banner shown for email user is already viewing | Suppression uses `activeFolderType` (e.g., "inbox") instead of folder ID, matching all folders of the same type across accounts |
 | Background 30-second budget exceeded | Missed notifications | Posting is <10ms/notification; filters are all synchronous O(1) lookups |
 | `UNUserNotificationCenterDelegate` reassigned by third-party code | Lost action handling | Set delegate in `App.init()`, store handler in `AppDependencies` (retained for app lifetime) |
 | Muted thread IDs accumulate indefinitely | UserDefaults bloat | Periodic cleanup on app launch: remove IDs for threads not in SwiftData |
@@ -1141,7 +1195,7 @@ All file paths are relative to `VaultMailPackage/Sources/VaultMailFeature/` unle
 |-----------|------|-------|
 | `SettingsStore` | `Shared/Services/SettingsStore.swift` | Extend with 6 properties |
 | `AppConstants` | `Shared/Constants.swift` | Add notification identifiers + recency constants |
-| `BackgroundSyncScheduler` | `Data/Sync/BackgroundSyncScheduler.swift` | Add coordinator parameter |
+| `BackgroundSyncScheduler` | `Data/Sync/BackgroundSyncScheduler.swift` | Add coordinator parameter; call `markFirstLaunchComplete()` after first account sync |
 | `MarkReadUseCase` | `Domain/UseCases/MarkReadUseCase.swift` | Called by response handler; note: `markAllRead(in: Thread)` takes a `Thread` object |
 | `ManageThreadActionsUseCase` | `Domain/UseCases/ManageThreadActionsUseCase.swift` | Called by response handler |
 | `ComposeEmailUseCase` | `Domain/UseCases/ComposeEmailUseCase.swift` | Called for reply action |
@@ -1150,7 +1204,8 @@ All file paths are relative to `VaultMailPackage/Sources/VaultMailFeature/` unle
 | `SyncEmailsUseCase` | `Domain/UseCases/SyncEmailsUseCase.swift` | Returns `[Email]` (`@discardableResult`) for notification triggers |
 | `IDLEMonitorUseCase` | `Domain/UseCases/IDLEMonitorUseCase.swift` | `.newMail` events trigger sync → notifications |
 | `AppDependencies` | **`VaultMail/VaultMailApp.swift`** (app target) | Wire all notification dependencies |
-| `ThreadListView` | `Presentation/ThreadList/ThreadListView.swift` | Call coordinator after sync; observe `navigateToThreadNotification`; owns `navigationPath`; `selectedFolder?.id` for active folder |
+| `ThreadListView` | `Presentation/ThreadList/ThreadListView.swift` | Call coordinator after sync; observe `navigateToThreadNotification`; owns `navigationPath`; `selectedFolder?.folderType` for active folder |
+| `MacOSMainView` | `Presentation/macOS/MacOSMainView.swift` | Call coordinator after all 3 sync paths (initial load, toolbar refresh, IDLE); `selectedFolder?.folderType` for active folder |
 | `MacSettingsView` | `Presentation/macOS/MacSettingsView.swift` | Replace `MacNotificationsSettingsTab` with shared `NotificationSettingsContent` |
 | `FolderType` | `Domain/Models/FolderType.swift` | `.inbox` for folder type filter |
 | `AICategory` | `Domain/Models/Email.swift` or enum file | Category values for filter |
