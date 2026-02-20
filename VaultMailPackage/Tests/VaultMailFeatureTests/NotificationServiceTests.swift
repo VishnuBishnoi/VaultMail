@@ -151,9 +151,9 @@ struct NotificationServiceTests {
     func recentEmailsDeliveredInForeground() async {
         let (service, center, _, _) = Self.makeService()
 
-        // Create email 2 minutes ago (within foreground threshold of 300 seconds)
+        // Create email 30 seconds ago (within foreground threshold of 120 seconds)
         let recentEmail = Self.makeEmail(
-            dateReceived: Date().addingTimeInterval(-120)
+            dateReceived: Date().addingTimeInterval(-30)
         )
 
         service.markFirstLaunchComplete()
@@ -167,9 +167,9 @@ struct NotificationServiceTests {
     func oldEmailsDeliveredInBackgroundWithinThreshold() async {
         let (service, center, _, _) = Self.makeService()
 
-        // Create email 30 minutes ago (within background threshold of 3600 seconds)
+        // Create email 5 minutes ago (within background threshold of 900 seconds)
         let email = Self.makeEmail(
-            dateReceived: Date().addingTimeInterval(-1800)
+            dateReceived: Date().addingTimeInterval(-300)
         )
 
         service.markFirstLaunchComplete()
