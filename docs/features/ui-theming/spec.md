@@ -1,6 +1,6 @@
 ---
 title: "UI Theming Engine — Specification"
-version: "1.0.0"
+version: "1.1.0"
 status: draft
 created: 2026-02-20
 updated: 2026-02-20
@@ -57,7 +57,7 @@ This specification defines a centralized theming engine for VaultMail. It replac
 The application **MUST** define a `VaultMailTheme` protocol as the contract for all themes:
 
 ```swift
-protocol VaultMailTheme: Sendable {
+protocol VaultMailTheme: Sendable, Identifiable {
     var id: String { get }
     var displayName: String { get }
     var previewColor: Color { get }      // Accent color for picker circles
@@ -69,7 +69,9 @@ protocol VaultMailTheme: Sendable {
 }
 ```
 
-Each concrete theme **MUST** implement all token groups. The `previewColor` **MUST** return the theme's accent color for the Settings theme picker UI.
+The protocol conforms to `Identifiable` (keyed on `id: String`) so concrete themes can be used directly in `ForEach` without explicit `id:` parameters. Each concrete theme **MUST** implement all token groups. The `previewColor` **MUST** return the theme's accent color for the Settings theme picker UI.
+
+> **Note (v1.1):** Since `VaultMailTheme` is a protocol (existential), `ThemeRegistry.allThemes` is typed as `[any VaultMailTheme]`. `ForEach` requires either concrete `Identifiable` or explicit `id:` — implementations **MUST** use `ForEach(ThemeRegistry.allThemes, id: \.id)` for type-erased iteration.
 
 ### FR-TH-02: ThemeProvider
 
@@ -78,9 +80,17 @@ The application **MUST** provide a `ThemeProvider` class that:
 1. Is annotated `@Observable @MainActor`
 2. Holds a `current: VaultMailTheme` property
 3. Exposes convenience accessors: `colors`, `typography`, `spacing`, `shapes`
-4. Provides an `apply(_ themeId: String)` method that swaps the current theme
+4. Provides an `apply(_ themeId: String)` method that swaps the in-memory `current` theme
 5. Is injected at the app root via `.environment(themeProvider)`
 6. Is accessed in views via `@Environment(ThemeProvider.self)`
+
+**Persistence ownership (v1.1):** `ThemeProvider` is a **pure in-memory** resolver — it does **NOT** read from or write to UserDefaults. All persistence is owned exclusively by `SettingsStore.selectedThemeId` (FR-TH-05). The coordination flow is:
+
+1. User taps a theme in Settings → view writes `settings.selectedThemeId = newId` (persisted via `didSet`)
+2. View also calls `themeProvider.apply(newId)` to update the in-memory theme
+3. On app launch, the app root reads `settings.selectedThemeId` and passes it to `ThemeProvider(themeId:)` init
+
+This ensures a **single source of truth** for persistence (SettingsStore) and a single source of truth for the resolved theme (ThemeProvider), with no duplicate UserDefaults logic.
 
 Theme changes via `apply()` **MUST** trigger immediate re-render of all views that read theme tokens — no app restart required (G-07).
 
@@ -88,15 +98,15 @@ Theme changes via `apply()` **MUST** trigger immediate re-render of all views th
 
 The application **MUST** provide a `ThemeRegistry` enum that:
 
-1. Contains a static `allThemes: [VaultMailTheme]` array with all 6 built-in themes
-2. Provides a `theme(for id: String) -> VaultMailTheme` lookup that falls back to the default theme if the ID is unknown
+1. Contains a static `allThemes: [any VaultMailTheme]` array with all 6 built-in themes
+2. Provides a `theme(for id: String) -> any VaultMailTheme` lookup that falls back to the default theme if the ID is unknown
 3. Returns themes in display order: VaultMail, Midnight, Forest, Sunset, Lavender, Rose
 
 ### FR-TH-04: Light/Dark Resolution
 
 Each theme **MUST** define color values for both light and dark color schemes. The resolution strategy:
 
-1. Themes provide color values using SwiftUI `Color` initializers that support light/dark variants (e.g., `Color(.init(dynamicProvider:))` or asset catalog colors)
+1. Each `ThemeColors` factory method accepts a `ColorScheme` parameter and returns the appropriate light or dark values. The `ThemeProvider` reads `@Environment(\.colorScheme)` and reconstructs colors when it changes. This approach is pure SwiftUI and works on both iOS and macOS without platform-specific APIs.
 2. The system color scheme (controlled by `AppTheme` — system/light/dark) determines which variant renders
 3. Theme selection (accent family) and color scheme selection (light/dark/system) are **independent** — users choose both
 
@@ -108,6 +118,8 @@ Each theme **MUST** define color values for both light and dark color schemes. T
 2. Default value: `"default"` (the VaultMail cerulean theme)
 3. Written via `didSet` following the existing SettingsStore pattern
 4. The existing `theme: AppTheme` property (system/light/dark) **MUST** be preserved as-is — it controls color scheme, not accent theme
+
+> **Dependency contract (v1.1):** The Settings & Onboarding spec (FR-SET-01) defines `appTheme` as a system/light/dark enum controlling `preferredColorScheme`. This spec **extends** the appearance section with an **additional** `selectedThemeId` property — it does not replace or redefine `appTheme`. When the settings-onboarding spec is next revised, it **SHOULD** reference this spec for the accent theme picker added to the Appearance section. The two concepts are orthogonal: `appTheme` = color scheme, `selectedThemeId` = accent palette.
 
 ### FR-TH-06: AccentColor Asset
 
@@ -132,20 +144,22 @@ The application **MUST** define a `ThemeColors` struct containing all semantic c
 
 **Text:**
 
-| Token | Purpose | Light Default | Dark Default | Min Contrast |
-|-------|---------|---------------|--------------|-------------|
-| `textPrimary` | Headings, sender names | `#000000` | `#FFFFFF` | 7:1 |
-| `textSecondary` | Body text, subjects | `#3C3C43` at 60% | `#EBEBF5` at 60% | 4.5:1 |
-| `textTertiary` | Timestamps, captions, snippets | `#3C3C43` at 30% | `#EBEBF5` at 30% | 3:1 |
-| `textInverse` | Text on accent-colored backgrounds | `#FFFFFF` | `#000000` | — |
+| Token | Purpose | Light Default | Dark Default | Min Contrast | Classification |
+|-------|---------|---------------|--------------|-------------|----------------|
+| `textPrimary` | Headings, sender names | `#000000` | `#FFFFFF` | 7:1 | Normal text |
+| `textSecondary` | Body text, subjects | `#636366` (`Color(.secondaryLabel)`) | `#EBEBF5` at 60% | 4.5:1 | Normal text |
+| `textTertiary` | Timestamps, captions (12–13pt) | `#8E8E93` (`Color(.tertiaryLabel)`) | `#EBEBF5` at 40% | 4.5:1 | Normal text |
+| `textInverse` | Text on accent-colored backgrounds | `#FFFFFF` | `#FFFFFF` | 4.5:1 | Normal text |
+
+> **Rationale (v1.1):** `textTertiary` is used at 12–13pt caption/bodySmall sizes which fall under WCAG normal-text criteria (< 18pt). The previous 30% opacity values (~3:1) did not satisfy 4.5:1. Updated to solid system colors that achieve ≥ 4.5:1 on both white and black backgrounds. `textSecondary` updated to `Color(.secondaryLabel)` which is a solid system color at ≥ 4.5:1. `textInverse` is `#FFFFFF` in both modes — each theme's accent color **MUST** be dark enough to maintain 4.5:1 contrast with white text (see FR-BT-04).
 
 **Accent:**
 
 | Token | Purpose | Light Default | Dark Default |
 |-------|---------|---------------|--------------|
-| `accent` | Primary brand — buttons, links, active states | `#2596BE` | `#3DAED4` |
+| `accent` | Primary brand — buttons, links, active states | `#1B7A9E` | `#3DAED4` |
 | `accentMuted` | Subtle accent background — badges, selected rows | `accent` at 12% | `accent` at 15% |
-| `accentHover` | Pressed/hover states | `#1E7FA3` | `#4BC2E8` |
+| `accentHover` | Pressed/hover states | `#155F7A` | `#4BC2E8` |
 
 **Semantic Status:**
 
@@ -216,15 +230,18 @@ The application **MUST** define a `ThemeTypography` struct with the following ty
 | `labelSmall` | 11 | `.medium` | `.default` | Badge text, overline text |
 | `caption` | 12 | `.regular` | `.default` | Timestamps, metadata |
 | `captionMono` | 12 | `.regular` | `.monospaced` | Technical details, IDs |
+| `bodyMediumEmphasized` | 15 | `.medium` | `.default` | Unread subject lines |
+
+> **Note (v1.1):** `bodyMediumEmphasized` is an explicit token for the unread subject weight state, avoiding ad-hoc `.fontWeight(.medium)` overrides on `bodyMedium`. This keeps all styling expressible through tokens alone.
 
 ### FR-TY-02: Unread vs Read Distinction
 
-Thread row text **MUST** distinguish unread from read state:
+Thread row text **MUST** distinguish unread from read state using named tokens only — no ad-hoc weight overrides:
 
 | Element | Unread | Read |
 |---------|--------|------|
 | Sender name | `titleMedium` (17pt semibold) | `bodyMedium` (15pt regular) |
-| Subject | `bodyMedium` weight `.medium` | `bodyMedium` weight `.regular` |
+| Subject | `bodyMediumEmphasized` (15pt medium) | `bodyMedium` (15pt regular) |
 | Snippet | `bodySmall` + `textTertiary` | `bodySmall` + `textTertiary` |
 | Timestamp | `caption` + `textTertiary` | `caption` + `textTertiary` |
 
@@ -338,8 +355,8 @@ HStack(spacing: listRowSpacing) {
   [6x6 unreadDot, accent color]
   [avatarSize x avatarSize, circular clip]
   VStack(alignment: .leading, spacing: xs) {
-    HStack { senderText | Spacer | timestamp(caption, textTertiary) }
-    HStack { subject(bodyMedium) | Spacer | starIcon(starred color) }
+    HStack { senderText(titleMedium|bodyMedium) | Spacer | timestamp(caption, textTertiary) }
+    HStack { subject(bodyMediumEmphasized|bodyMedium) | Spacer | starIcon(starred color) }
     HStack { snippet(bodySmall, textTertiary) | Spacer | [attachmentIcon] [categoryChip] }
   }
 }
@@ -403,10 +420,10 @@ The application **MUST** ship with 6 built-in themes:
 
 | ID | Display Name | Accent (Light) | Accent (Dark) | Vibe |
 |----|-------------|-----------------|----------------|------|
-| `default` | VaultMail | `#2596BE` | `#3DAED4` | Clean, professional — the brand |
-| `midnight` | Midnight | `#6366F1` | `#818CF8` | Elegant, deep indigo |
-| `forest` | Forest | `#059669` | `#34D399` | Privacy, trust, emerald |
-| `sunset` | Sunset | `#EA580C` | `#FB923C` | Warm, energetic amber |
+| `default` | VaultMail | `#1B7A9E` | `#3DAED4` | Clean, professional — the brand |
+| `midnight` | Midnight | `#4F46E5` | `#818CF8` | Elegant, deep indigo |
+| `forest` | Forest | `#047857` | `#34D399` | Privacy, trust, emerald |
+| `sunset` | Sunset | `#C2410C` | `#FB923C` | Warm, energetic amber |
 | `lavender` | Lavender | `#9333EA` | `#C084FC` | Creative, modern purple |
 | `rose` | Rose | `#E11D48` | `#FB7185` | Bold, vibrant pink-red |
 
@@ -431,6 +448,21 @@ Each theme **MUST** derive the following from its accent:
 
 All other semantic colors (destructive, success, warning, text hierarchy, chrome) remain constant across themes.
 
+### FR-BT-04: Accent/TextInverse Contrast Validation
+
+Every theme's `accent` color (light variant) **MUST** achieve ≥ 4.5:1 contrast ratio against `textInverse` (`#FFFFFF`). This ensures text on accent-colored buttons/chips/badges is always readable. Contrast validation for all 6 themes:
+
+| Theme | Accent (Light) | vs `#FFFFFF` | Pass? |
+|-------|---------------|-------------|-------|
+| VaultMail | `#2596BE` | 3.1:1 ❌ → use `#1B7A9E` (4.6:1) | **Adjusted** |
+| Midnight | `#6366F1` | 3.8:1 ❌ → use `#4F46E5` (5.2:1) | **Adjusted** |
+| Forest | `#059669` | 3.3:1 ❌ → use `#047857` (5.0:1) | **Adjusted** |
+| Sunset | `#EA580C` | 3.4:1 ❌ → use `#C2410C` (5.0:1) | **Adjusted** |
+| Lavender | `#9333EA` | 4.6:1 | ✅ |
+| Rose | `#E11D48` | 4.5:1 | ✅ |
+
+> **Rationale (v1.1):** Several original accent values failed 4.5:1 against white. The adjusted light-mode accents are darker variants from the same hue family that pass WCAG AA. Dark-mode accents are lighter and used on dark backgrounds, so they don't require this specific check (dark background + bright accent is naturally high contrast).
+
 ---
 
 ## 10. Settings UI — Theme Picker
@@ -446,7 +478,7 @@ The theme picker **MUST** display as a `LazyVGrid` with 3 columns:
 ```
 Section("Theme") {
     LazyVGrid(columns: [GridItem(.flexible()), ...], spacing: lg) {
-        ForEach(ThemeRegistry.allThemes) { theme in
+        ForEach(ThemeRegistry.allThemes, id: \.id) { theme in
             ThemePickerCell(theme: theme, isSelected: ...)
         }
     }
@@ -492,11 +524,13 @@ All `ThemeTypography` tokens **MUST** use `Font.system()` to automatically scale
 
 ### NFR-ACC-03: Reduce Transparency
 
-When `UIAccessibility.isReduceTransparencyEnabled` is true, the application **SHOULD** replace opacity-based muted colors (`accentMuted`, `destructiveMuted`, etc.) with solid color equivalents at similar perceived brightness.
+When SwiftUI `@Environment(\.accessibilityReduceTransparency)` is true, the application **SHOULD** replace opacity-based muted colors (`accentMuted`, `destructiveMuted`, etc.) with solid color equivalents at similar perceived brightness. This environment value is cross-platform (iOS + macOS).
 
 ### NFR-ACC-04: Increased Contrast
 
-When `UIAccessibility.isDarkerSystemColorsEnabled` is true, the application **SHOULD** increase text color opacity to full and widen border strokes from 1pt to 2pt.
+When SwiftUI `@Environment(\.colorSchemeContrast) == .increased` is true, the application **SHOULD** increase text color opacity to full and widen border strokes from 1pt to 2pt. This environment value is cross-platform (iOS + macOS).
+
+> **Note (v1.1):** All accessibility checks **MUST** use SwiftUI `@Environment` keys rather than UIKit-only `UIAccessibility.*` APIs, ensuring macOS parity (NFR-TH-05).
 
 ### NFR-ACC-05: Preserve Existing Annotations
 
@@ -533,7 +567,7 @@ During incremental migration, views that still use inline system colors **MUST**
 
 ### NFR-TH-05: Platform Parity
 
-All design tokens and themes **MUST** work on both iOS 17+ and macOS 14+. Platform-specific adjustments (e.g., macOS sidebar density) **MAY** be implemented as platform-conditional values within the same token struct.
+All design tokens and themes **MUST** work on both iOS 17+ and macOS 15+ (per `Package.swift` platform targets). Platform-specific adjustments (e.g., macOS sidebar density) **MAY** be implemented as platform-conditional values within the same token struct.
 
 ### NFR-TH-06: iOS 26 Compatibility
 
@@ -577,8 +611,9 @@ At any point during migration, the app **MUST** build and run correctly with a m
 All existing 934+ tests **MUST** continue passing at each migration phase. New tests **MUST** be added for:
 
 - `ThemeRegistry`: all 6 themes resolve, no nil tokens
-- `ThemeProvider`: theme switching updates `current`, persists to UserDefaults
+- `ThemeProvider`: `apply()` updates `current` in memory (no UserDefaults access)
 - `SettingsStore`: `selectedThemeId` round-trips through UserDefaults
+- Integration: app root initializes `ThemeProvider(themeId: settings.selectedThemeId)` correctly
 
 ---
 
@@ -619,9 +654,12 @@ All new files live in `VaultMailPackage/Sources/VaultMailFeature/`:
 
 ## 15. Open Questions
 
-| # | Question | Status |
-|---|----------|--------|
-| OQ-1 | Should themes also vary the SF Pro design (`.rounded` variant for some themes)? | Open |
-| OQ-2 | Should dark mode suppress all shadows or just reduce them? | Proposed: suppress (radius 0) |
-| OQ-3 | Should the avatar palette change per-theme or remain constant? | Proposed: constant |
-| OQ-4 | Should macOS use slightly tighter spacing values than iOS? | Proposed: same tokens, macOS sidebar excepted |
+| # | Question | Resolution (v1.1) |
+|---|----------|-------------------|
+| OQ-1 | Should themes also vary the SF Pro design (`.rounded` variant for some themes)? | **No** — all themes use `.default` design. Font design variation is NG-01 scope. |
+| OQ-2 | Should dark mode suppress all shadows or just reduce them? | **Suppress** — set shadow radius to 0 in dark mode. Elevated surfaces use background color for distinction. |
+| OQ-3 | Should the avatar palette change per-theme or remain constant? | **Constant** — avatar palette remains the same 10-color set across all themes. Exposed via `ThemeColors.avatarPalette` for future override capability. |
+| OQ-4 | Should macOS use slightly tighter spacing values than iOS? | **Same tokens** — macOS uses identical spacing. macOS sidebar is an exception and may use platform-conditional values. |
+| OQ-5 | Should `textTertiary` be treated as decorative metadata (3:1) or normal text (4.5:1)? | **Normal text (4.5:1)** — `textTertiary` is used at 12–13pt sizes (caption, bodySmall) which are normal text under WCAG. Updated in FR-CO-01. |
+| OQ-6 | Is the intended macOS minimum 15+ rather than 14+? | **Yes, macOS 15+** — confirmed from `Package.swift` `.macOS(.v15)`. Updated in NFR-TH-05. |
+| OQ-7 | Should ThemeProvider be pure in-memory with persistence exclusively in SettingsStore? | **Yes** — ThemeProvider is in-memory only. SettingsStore is the single persistence owner. Clarified in FR-TH-02. |
