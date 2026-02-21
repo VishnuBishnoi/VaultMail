@@ -120,6 +120,8 @@ public struct MacOSMainView: View {
     // Search
     @State private var searchText = ""
     @State private var isSearchActive = false
+    @State private var searchThreads: [VaultMailFeature.Thread] = []
+    @State private var isSearchLoading = false
 
     // Compose sheet
     @State private var composerMode: ComposerMode? = nil
@@ -189,6 +191,13 @@ public struct MacOSMainView: View {
         return AvatarView.color(for: thread.accountId)
     }
 
+    private var displayThreads: [VaultMailFeature.Thread] {
+        if isSearchActive {
+            return searchThreads
+        }
+        return threads
+    }
+
     // MARK: - Body
 
     public var body: some View {
@@ -231,7 +240,7 @@ public struct MacOSMainView: View {
             // CONTENT — Thread List
             MacThreadListContentView(
                 viewState: viewState,
-                threads: threads,
+                threads: displayThreads,
                 selectedThreadID: $selectedThreadID,
                 selectedThreadIDs: $selectedThreadIDs,
                 selectedCategory: $selectedCategory,
@@ -243,6 +252,8 @@ public struct MacOSMainView: View {
                 isLoadingMore: isLoadingMore,
                 isSyncing: isSyncing,
                 errorMessage: errorMessage,
+                searchQuery: searchText,
+                isSearching: isSearchLoading,
                 accountColorProvider: accountColor,
                 onLoadMore: { Task { await loadMoreThreads() } },
                 onArchive: { thread in Task { await archiveThread(thread) } },
@@ -333,6 +344,14 @@ public struct MacOSMainView: View {
         .onChange(of: selectedCategory) {
             Task { await reloadThreads() }
         }
+        .onChange(of: searchText) { _, value in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            isSearchActive = !trimmed.isEmpty
+            if trimmed.isEmpty {
+                searchThreads = []
+                isSearchLoading = false
+            }
+        }
         .onChange(of: selectedThreadID) {
             updateCommandState()
         }
@@ -346,6 +365,13 @@ public struct MacOSMainView: View {
         .onDisappear {
             idleTask?.cancel()
             syncTask?.cancel()
+        }
+        .task(id: SearchDebounceTrigger(text: searchText, selectedFolderId: selectedFolder?.id, selectedAccountId: selectedAccount?.id)) {
+            let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            await performSearch()
         }
         .onReceive(NotificationCenter.default.publisher(for: AppConstants.accountsDidChangeNotification)) { _ in
             Task { await refreshAfterAccountChange() }
@@ -431,6 +457,7 @@ public struct MacOSMainView: View {
                     let syncedEmails = (try? await syncEmails.syncAccountInboxFirst(accountId: accountId, onInboxSynced: { _ in
                         await loadThreadsAndCounts()
                     })) ?? []
+                    runAIClassification(for: syncedEmails)
                     await loadThreadsAndCounts()
                     // Notify notification coordinator about manual sync emails (NOTIF-03)
                     await notificationCoordinator.didSyncNewEmails(
@@ -534,9 +561,10 @@ public struct MacOSMainView: View {
                 isSyncing = true
                 defer { isSyncing = false; syncTask = nil }
                 guard let accountId = selectedAccount?.id else { return }
-                _ = try? await syncEmails.syncAccountInboxFirst(accountId: accountId, onInboxSynced: { _ in
+                let syncedEmails = (try? await syncEmails.syncAccountInboxFirst(accountId: accountId, onInboxSynced: { _ in
                     await loadThreadsAndCounts()
-                })
+                })) ?? []
+                runAIClassification(for: syncedEmails)
                 await loadThreadsAndCounts()
             }
         }
@@ -645,6 +673,7 @@ public struct MacOSMainView: View {
                 }
                 await loadThreadsAndCounts()
             }
+            runAIClassification(for: syncedEmails)
             // Mark first launch complete so subsequent syncs can deliver notifications.
             // The initial sync emails are suppressed to avoid flooding on first open.
             notificationCoordinator.markFirstLaunchComplete()
@@ -764,6 +793,9 @@ public struct MacOSMainView: View {
             }
 
             threads = page.threads
+            if !isSearchActive {
+                searchThreads = []
+            }
             paginationCursor = page.nextCursor
             hasMorePages = page.hasMore
             unreadCounts = counts
@@ -797,6 +829,9 @@ public struct MacOSMainView: View {
                 )
             }
             threads.append(contentsOf: page.threads)
+            if !isSearchActive {
+                searchThreads = []
+            }
             paginationCursor = page.nextCursor
             hasMorePages = page.hasMore
         } catch {
@@ -923,6 +958,7 @@ public struct MacOSMainView: View {
                     if case .newMail = event {
                         if let folderId = selectedFolder?.id {
                             let syncedEmails = (try? await syncEmails.syncFolder(accountId: accountId, folderId: folderId)) ?? []
+                            runAIClassification(for: syncedEmails)
                             await loadThreadsAndCounts()
                             // Notify notification coordinator about IDLE-delivered emails (NOTIF-03)
                             await notificationCoordinator.didSyncNewEmails(
@@ -1029,5 +1065,113 @@ public struct MacOSMainView: View {
             break
         }
     }
+
+    // MARK: - Search
+
+    private func performSearch() async {
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            isSearchActive = false
+            isSearchLoading = false
+            searchThreads = []
+            return
+        }
+
+        guard let searchUseCase else {
+            isSearchActive = true
+            isSearchLoading = false
+            searchThreads = []
+            return
+        }
+
+        isSearchActive = true
+        isSearchLoading = true
+
+        let query = SearchQueryParser.parse(trimmed, scope: .allMail)
+        let engine = await aiEngineResolver?.resolveGenerativeEngine()
+        let results = await searchUseCase.execute(query: query, engine: engine)
+
+        guard !Task.isCancelled else { return }
+
+        var seenThreadIds = Set<String>()
+        var orderedThreadIds: [String] = []
+        for result in results {
+            if seenThreadIds.insert(result.threadId).inserted {
+                orderedThreadIds.append(result.threadId)
+            }
+        }
+
+        let fetchedThreads = fetchThreadsForSearch(ids: orderedThreadIds)
+        let threadMap = Dictionary(uniqueKeysWithValues: fetchedThreads.map { ($0.id, $0) })
+        searchThreads = orderedThreadIds.compactMap { threadMap[$0] }
+
+        // Fallback for stale/empty FTS index: local SwiftData text scan.
+        if searchThreads.isEmpty {
+            let fallbackThreadIds = fetchFallbackThreadIds(query: trimmed)
+            let fallbackThreads = fetchThreadsForSearch(ids: fallbackThreadIds)
+            let fallbackMap = Dictionary(uniqueKeysWithValues: fallbackThreads.map { ($0.id, $0) })
+            searchThreads = fallbackThreadIds.compactMap { fallbackMap[$0] }
+        }
+
+        isSearchLoading = false
+    }
+
+    private func fetchThreadsForSearch(ids: [String]) -> [VaultMailFeature.Thread] {
+        guard !ids.isEmpty else { return [] }
+        let idSet = Set(ids)
+        let descriptor = FetchDescriptor<VaultMailFeature.Thread>(
+            predicate: #Predicate<VaultMailFeature.Thread> { thread in
+                idSet.contains(thread.id)
+            }
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
+    private func fetchFallbackThreadIds(query: String) -> [String] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return [] }
+
+        let descriptor = FetchDescriptor<Email>()
+        guard let emails = try? modelContext.fetch(descriptor) else { return [] }
+
+        var seen = Set<String>()
+        var ids: [String] = []
+        for email in emails {
+            let haystacks = [
+                email.subject,
+                email.fromAddress,
+                email.fromName ?? "",
+                email.snippet ?? "",
+                email.bodyPlain ?? "",
+            ]
+
+            let matches = haystacks.contains { field in
+                field.lowercased().contains(q)
+            }
+            guard matches else { continue }
+
+            let threadId = email.threadId
+            if seen.insert(threadId).inserted {
+                ids.append(threadId)
+            }
+        }
+        return ids
+    }
+
+    /// Keeps macOS in parity with iOS: synced emails are enqueued for AI
+    /// processing, which also updates search indexes for new content.
+    private func runAIClassification(for syncedEmails: [Email]) {
+        guard let queue = aiProcessingQueue else { return }
+        let sorted = syncedEmails
+            .sorted { ($0.dateReceived ?? .distantPast) < ($1.dateReceived ?? .distantPast) }
+        guard !sorted.isEmpty else { return }
+        queue.enqueue(emails: sorted)
+    }
+}
+
+private struct SearchDebounceTrigger: Equatable {
+    let text: String
+    let selectedFolderId: String?
+    let selectedAccountId: String?
 }
 #endif
