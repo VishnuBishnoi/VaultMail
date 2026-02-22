@@ -113,56 +113,66 @@ struct MacThreadListContentView: View {
     // MARK: - Thread List
 
     private var threadList: some View {
-        List(selection: $selectedThreadID) {
-            // Sync progress
-            if isSyncing {
-                HStack(spacing: theme.spacing.sm) {
-                    ProgressView().controlSize(.small)
-                    Text("Syncing…").font(theme.typography.bodyMedium).foregroundStyle(theme.colors.textSecondary)
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                // Sync progress
+                if isSyncing {
+                    HStack(spacing: theme.spacing.sm) {
+                        ProgressView().controlSize(.small)
+                        Text("Syncing…").font(theme.typography.bodyMedium).foregroundStyle(theme.colors.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, theme.spacing.lg)
+                    .padding(.vertical, theme.spacing.sm)
+                    .background(theme.colors.accent.opacity(0.05))
                 }
-                .listRowBackground(theme.colors.accent.opacity(0.05))
-            }
 
-            // Error banner
-            if let errorMessage {
-                HStack(spacing: theme.spacing.sm) {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(theme.colors.warning)
-                    Text(errorMessage).font(theme.typography.bodyMedium).lineLimit(2)
-                    Spacer()
+                // Error banner
+                if let errorMessage {
+                    HStack(spacing: theme.spacing.sm) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(theme.colors.warning)
+                        Text(errorMessage).font(theme.typography.bodyMedium).lineLimit(2)
+                        Spacer()
+                    }
+                    .padding(.horizontal, theme.spacing.lg)
+                    .padding(.vertical, theme.spacing.xs)
+                    .background(theme.colors.warning.opacity(0.1))
                 }
-                .padding(.vertical, theme.spacing.xs)
-                .listRowBackground(theme.colors.warning.opacity(0.1))
-            }
 
-            // Outbox or regular threads
-            if isOutboxSelected {
-                ForEach(outboxEmails, id: \.id) { email in
-                    OutboxRowView(email: email, onRetry: {}, onCancel: {})
-                }
-            } else {
-                ForEach(threads, id: \.id) { thread in
-                    ThreadRowView(
-                        thread: thread,
-                        accountColor: accountColorProvider(thread),
-                        isMuted: settings.mutedThreadIds.contains(thread.id)
-                    )
-                    .tag(thread.id)
-                    .contextMenu { threadContextMenu(for: thread) }
-                }
-            }
+                // Outbox or regular threads
+                if isOutboxSelected {
+                    ForEach(outboxEmails, id: \.id) { email in
+                        OutboxRowView(email: email, onRetry: {}, onCancel: {})
+                            .padding(.horizontal, theme.spacing.lg)
+                        Divider().padding(.leading, theme.spacing.xxxl)
+                    }
+                } else {
+                    ForEach(threads, id: \.id) { thread in
+                        MacThreadRow(
+                            thread: thread,
+                            isSelected: selectedThreadID == thread.id,
+                            accountColor: accountColorProvider(thread),
+                            isMuted: settings.mutedThreadIds.contains(thread.id),
+                            onTap: { selectedThreadID = thread.id }
+                        )
+                        .contextMenu { threadContextMenu(for: thread) }
 
-            // Pagination sentinel
-            if hasMorePages {
-                HStack {
-                    Spacer()
-                    ProgressView().padding(.vertical, theme.spacing.sm)
-                    Spacer()
+                        Divider().padding(.leading, theme.spacing.xxxl)
+                    }
                 }
-                .listRowSeparator(.hidden)
-                .onAppear { onLoadMore() }
+
+                // Pagination sentinel
+                if hasMorePages {
+                    HStack {
+                        Spacer()
+                        ProgressView().padding(.vertical, theme.spacing.sm)
+                        Spacer()
+                    }
+                    .onAppear { onLoadMore() }
+                }
             }
         }
-        .listStyle(.plain)
+        .background(theme.colors.background)
         .accessibilityLabel("Email threads")
     }
 
@@ -205,6 +215,47 @@ struct MacThreadListContentView: View {
                 thread.isStarred ? "Unstar" : "Star",
                 systemImage: thread.isStarred ? "star.slash" : "star"
             )
+        }
+    }
+}
+
+// MARK: - Mac Thread Row (hover + selection)
+
+/// Wrapper that adds hover highlight and themed selection background to thread rows on macOS.
+private struct MacThreadRow: View {
+    let thread: VaultMailFeature.Thread
+    let isSelected: Bool
+    var accountColor: Color? = nil
+    var isMuted: Bool = false
+    let onTap: () -> Void
+
+    @Environment(ThemeProvider.self) private var theme
+    @State private var isHovered = false
+
+    var body: some View {
+        ThreadRowView(
+            thread: thread,
+            accountColor: accountColor,
+            isMuted: isMuted
+        )
+        .padding(.horizontal, theme.spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(rowBackground)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+
+    @ViewBuilder
+    private var rowBackground: some View {
+        if isSelected {
+            theme.colors.surfaceSelected
+        } else if isHovered {
+            theme.colors.surfaceHovered
+        } else {
+            Color.clear
         }
     }
 }

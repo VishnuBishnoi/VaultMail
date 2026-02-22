@@ -196,6 +196,7 @@ struct ThemeColorsTests {
         _ = colors.surface
         _ = colors.surfaceElevated
         _ = colors.surfaceSelected
+        _ = colors.surfaceHovered
 
         // Text
         _ = colors.textPrimary

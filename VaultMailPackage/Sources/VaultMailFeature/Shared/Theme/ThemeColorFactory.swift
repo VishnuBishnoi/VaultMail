@@ -28,7 +28,12 @@ enum ThemeColorFactory {
             background: isDark ? Color(hex: 0x000000) : Color(hex: 0xFFFFFF),
             surface: isDark ? Color(hex: 0x1C1C1E) : Color(hex: 0xFFFFFF),
             surfaceElevated: isDark ? Color(hex: 0x2C2C2E) : Color(hex: 0xF2F2F7),
-            surfaceSelected: accentMuted,
+            surfaceSelected: isDark
+                ? Color.white.opacity(0.08)
+                : Color.black.opacity(0.06),
+            surfaceHovered: isDark
+                ? Color.white.opacity(0.04)
+                : Color.black.opacity(0.03),
 
             // Text
             textPrimary: isDark ? .white : .black,

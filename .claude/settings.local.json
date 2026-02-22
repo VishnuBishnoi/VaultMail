@@ -87,7 +87,9 @@
       "Bash(swift build:*)",
       "Bash(swift test:*)",
       "Bash(echo:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "mcp__xcode-build__session_set_defaults",
+      "mcp__xcode-build__build_sim"
     ]
   },
   "enabledPlugins": {

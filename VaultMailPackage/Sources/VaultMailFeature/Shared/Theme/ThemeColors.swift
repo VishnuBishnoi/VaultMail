@@ -16,8 +16,10 @@ public struct ThemeColors: Sendable {
     public let surface: Color
     /// Modals, popovers, search bar fill.
     public let surfaceElevated: Color
-    /// Selected / highlighted rows (accent-tinted).
+    /// Selected / highlighted rows — subtle neutral.
     public let surfaceSelected: Color
+    /// Hover highlight on macOS rows.
+    public let surfaceHovered: Color
 
     // MARK: - Text
 
@@ -108,6 +110,7 @@ public struct ThemeColors: Sendable {
         surface: Color,
         surfaceElevated: Color,
         surfaceSelected: Color,
+        surfaceHovered: Color,
         textPrimary: Color,
         textSecondary: Color,
         textTertiary: Color,
@@ -147,6 +150,7 @@ public struct ThemeColors: Sendable {
         self.surface = surface
         self.surfaceElevated = surfaceElevated
         self.surfaceSelected = surfaceSelected
+        self.surfaceHovered = surfaceHovered
         self.textPrimary = textPrimary
         self.textSecondary = textSecondary
         self.textTertiary = textTertiary
