@@ -124,7 +124,7 @@ public enum AppConstants {
         ProcessInfo.processInfo.environment["VAULTMAIL_DISABLE_MAC_HELPER"] != "1"
     }
     /// Polling interval used by helper when app heartbeat is stale.
-    public static let macHelperPollIntervalSeconds: TimeInterval = 10 * 60
+    public static let macHelperPollIntervalSeconds: TimeInterval = 1 * 60
     /// App-group identifier shared between main app and helper.
     public static let sharedAppGroupIdentifier = "group.com.Rajeshdara.vaultmailv"
     /// Keychain access-group identifier shared between main app and helper.
