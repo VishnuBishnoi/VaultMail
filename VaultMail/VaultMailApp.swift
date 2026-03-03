@@ -93,6 +93,7 @@ struct VaultMailApp: App {
         .environment(deps.settingsStore)
         .environment(deps.themeProvider)
         .environment(deps.notificationCoordinator)
+        .environment(deps.backgroundSyncScheduler)
         .modelContainer(deps.modelContainer)
         .task {
             await deps.searchIndexManager.openIndex()
@@ -123,6 +124,7 @@ struct VaultMailApp: App {
         .environment(deps.settingsStore)
         .environment(deps.themeProvider)
         .environment(deps.notificationCoordinator)
+        .environment(deps.backgroundSyncScheduler)
         .modelContainer(deps.modelContainer)
         .task {
             await deps.searchIndexManager.openIndex()
@@ -176,7 +178,7 @@ private struct AppDependencies {
         themeProvider.fontScale = settingsStore.fontSize.scale
         appLockManager = AppLockManager()
 
-        let keychainManager = KeychainManager()
+        let keychainManager = KeychainManager(accessGroup: KeychainManager.entitlementAccessGroup())
         let oauthManager = OAuthManager(clientId: AppConstants.oauthClientId)
         let accountRepo = AccountRepositoryImpl(
             modelContainer: modelContainer,
@@ -315,6 +317,7 @@ private struct AppDependencies {
         backgroundSyncScheduler = BackgroundSyncScheduler(
             syncEmails: syncEmails,
             manageAccounts: manageAccounts,
+            settingsStore: settingsStore,
             notificationCoordinator: notificationCoordinator
         )
         backgroundSyncScheduler.registerTasks()

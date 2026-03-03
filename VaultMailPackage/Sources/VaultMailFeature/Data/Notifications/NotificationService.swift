@@ -54,8 +54,12 @@ public final class NotificationService: NotificationServiceProtocol {
     // MARK: - Notification Delivery (NOTIF-03, NOTIF-04)
 
     public func processNewEmails(_ emails: [Email], fromBackground: Bool) async {
+        _ = await processNewEmailsReporting(emails, fromBackground: fromBackground)
+    }
+
+    public func processNewEmailsReporting(_ emails: [Email], fromBackground: Bool) async -> NotificationDeliveryReport {
         // Suppress during first launch (NOTIF-08)
-        guard !isFirstLaunch else { return }
+        guard !isFirstLaunch else { return .init(deliveredCount: 0, suppressedCount: emails.count) }
 
         // Recency threshold
         let recencySeconds = fromBackground
@@ -64,24 +68,40 @@ public final class NotificationService: NotificationServiceProtocol {
         let cutoffDate = Date().addingTimeInterval(-TimeInterval(recencySeconds))
 
         var deliveredCount = 0
+        var suppressedCount = 0
 
         for email in emails {
             // Batch limit (NOTIF-19)
-            guard deliveredCount < AppConstants.maxNotificationsPerSync else { break }
+            guard deliveredCount < AppConstants.maxNotificationsPerSync else {
+                suppressedCount += 1
+                continue
+            }
 
             // Skip read emails
-            guard !email.isRead else { continue }
+            guard !email.isRead else {
+                suppressedCount += 1
+                continue
+            }
 
             // Dedup: skip if already delivered
             let notificationId = "email-\(email.id)"
-            guard !deliveredNotificationIds.contains(notificationId) else { continue }
+            guard !deliveredNotificationIds.contains(notificationId) else {
+                suppressedCount += 1
+                continue
+            }
 
             // Recency: skip old emails
             let emailDate = email.dateReceived ?? email.dateSent ?? .distantPast
-            guard emailDate > cutoffDate else { continue }
+            guard emailDate > cutoffDate else {
+                suppressedCount += 1
+                continue
+            }
 
             // Run filter pipeline
-            guard await filterPipeline.shouldNotify(for: email) else { continue }
+            guard await filterPipeline.shouldNotify(for: email) else {
+                suppressedCount += 1
+                continue
+            }
 
             // Build and deliver notification
             let request = NotificationContentBuilder.build(from: email)
@@ -96,11 +116,13 @@ public final class NotificationService: NotificationServiceProtocol {
                 }
             } catch {
                 // Silently skip failed notification delivery
+                suppressedCount += 1
             }
         }
 
         // Update badge after processing
         await updateBadgeCount()
+        return .init(deliveredCount: deliveredCount, suppressedCount: suppressedCount)
     }
 
     // MARK: - Notification Removal (NOTIF-05)
@@ -211,6 +233,7 @@ public final class NotificationService: NotificationServiceProtocol {
     public func requestAuthorization() async -> Bool { false }
     public func authorizationStatus() async -> NotificationAuthStatus { .denied }
     public func processNewEmails(_ emails: [Email], fromBackground: Bool) async {}
+    public func processNewEmailsReporting(_ emails: [Email], fromBackground: Bool) async -> NotificationDeliveryReport { .empty }
     public func removeNotifications(forEmailIds emailIds: [String]) async {}
     public func removeNotifications(forThreadId threadId: String) async {}
     public func updateBadgeCount() async {}

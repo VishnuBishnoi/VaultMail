@@ -112,7 +112,7 @@ struct BackgroundSyncSchedulerTests {
 
     @Test("Task identifier matches Info.plist value")
     func taskIdentifier() {
-        #expect(BackgroundSyncScheduler.taskIdentifier == "com.vaultmail.app.sync")
+        #expect(BackgroundSyncScheduler.taskIdentifier == "com.Rajeshdara.vaultmailv.sync")
     }
 
     @Test("Scheduler initializes with provided dependencies")
@@ -122,7 +122,8 @@ struct BackgroundSyncSchedulerTests {
 
         let scheduler = BackgroundSyncScheduler(
             syncEmails: syncEmails,
-            manageAccounts: manageAccounts
+            manageAccounts: manageAccounts,
+            settingsStore: SettingsStore(defaults: UserDefaults(suiteName: "test.bg.init.\(UUID().uuidString)")!)
         )
 
         // Scheduler should be created without errors
@@ -136,7 +137,8 @@ struct BackgroundSyncSchedulerTests {
 
         let scheduler = BackgroundSyncScheduler(
             syncEmails: syncEmails,
-            manageAccounts: manageAccounts
+            manageAccounts: manageAccounts,
+            settingsStore: SettingsStore(defaults: UserDefaults(suiteName: "test.bg.register.\(UUID().uuidString)")!)
         )
 
         // On macOS this is a no-op, on iOS it registers with BGTaskScheduler.
@@ -151,7 +153,8 @@ struct BackgroundSyncSchedulerTests {
 
         let scheduler = BackgroundSyncScheduler(
             syncEmails: syncEmails,
-            manageAccounts: manageAccounts
+            manageAccounts: manageAccounts,
+            settingsStore: SettingsStore(defaults: UserDefaults(suiteName: "test.bg.schedule.\(UUID().uuidString)")!)
         )
 
         // On macOS this is a no-op, on iOS it submits a BGAppRefreshTaskRequest.

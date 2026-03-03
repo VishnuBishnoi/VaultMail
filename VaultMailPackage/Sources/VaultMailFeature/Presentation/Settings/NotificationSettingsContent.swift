@@ -15,6 +15,10 @@ public struct NotificationSettingsContent: View {
 
     @State private var authStatus: NotificationAuthStatus = .notDetermined
     @State private var newVIPEmail = ""
+    #if os(macOS)
+    @State private var helperStatusText = "Unavailable"
+    @State private var helperErrorText: String?
+    #endif
     #if DEBUG
     @State private var debugStatus: String?
     #endif
@@ -26,11 +30,15 @@ public struct NotificationSettingsContent: View {
     public var body: some View {
         Form {
             systemPermissionSection
+            backgroundDeliverySection
             accountsSection
             categoriesSection
             vipContactsSection
             mutedThreadsSection
             quietHoursSection
+            #if os(macOS)
+            helperSection
+            #endif
             #if DEBUG
             debugSection
             #endif
@@ -40,6 +48,42 @@ public struct NotificationSettingsContent: View {
         #endif
         .task {
             await checkAuthStatus()
+            #if os(macOS)
+            helperStatusText = MacLoginItemManager().statusDescription
+            #endif
+        }
+    }
+
+    // MARK: - Background Delivery Section
+
+    @ViewBuilder
+    private var backgroundDeliverySection: some View {
+        @Bindable var settings = settings
+        Section {
+            Toggle("Background Alerts (Best Effort)", isOn: $settings.backgroundAlertsEnabled)
+                .tint(theme.colors.accent)
+                .accessibilityLabel("Background alerts best effort")
+
+            if let lastCheck = settings.lastBackgroundCheckAt {
+                HStack {
+                    Text("Last Background Check")
+                    Spacer()
+                    Text(lastCheck.formatted(date: .abbreviated, time: .shortened))
+                        .foregroundStyle(theme.colors.textSecondary)
+                }
+            }
+            if let lastAlert = settings.lastBackgroundAlertAt {
+                HStack {
+                    Text("Last Background Alert")
+                    Spacer()
+                    Text(lastAlert.formatted(date: .abbreviated, time: .shortened))
+                        .foregroundStyle(theme.colors.textSecondary)
+                }
+            }
+        } header: {
+            Text("Background Delivery")
+        } footer: {
+            Text("Best effort only. Background checks may be delayed by the system.")
         }
     }
 
@@ -273,6 +317,51 @@ public struct NotificationSettingsContent: View {
             Text("Notifications are silenced during quiet hours. VIP contacts override this setting.")
         }
     }
+
+    #if os(macOS)
+    // MARK: - macOS Helper Section
+
+    @ViewBuilder
+    private var helperSection: some View {
+        @Bindable var settings = settings
+        Section {
+            Toggle("Enable Fully-Quit Alerts", isOn: Binding(
+                get: { settings.macLoginItemHelperEnabled },
+                set: { newValue in
+                    let manager = MacLoginItemManager()
+                    do {
+                        try manager.setEnabled(newValue)
+                        settings.macLoginItemHelperEnabled = newValue
+                        helperStatusText = manager.statusDescription
+                        helperErrorText = nil
+                    } catch {
+                        settings.macLoginItemHelperEnabled = false
+                        helperStatusText = manager.statusDescription
+                        helperErrorText = "Could not update helper status."
+                    }
+                }
+            ))
+            .disabled(!AppConstants.macLoginItemHelperFeatureEnabled)
+            .tint(theme.colors.accent)
+
+            HStack {
+                Text("Helper Status")
+                Spacer()
+                Text(helperStatusText)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+
+            if let helperErrorText {
+                Text(helperErrorText)
+                    .foregroundStyle(theme.colors.warning)
+            }
+        } header: {
+            Text("Login Item Helper")
+        } footer: {
+            Text("When enabled, a login item can check for mail and notify even after the app is quit.")
+        }
+    }
+    #endif
 
     // MARK: - Debug Section
 

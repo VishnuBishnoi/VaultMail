@@ -28,6 +28,23 @@ public enum ModelContainerFactory {
         let schema = Schema(modelTypes)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
+        let sharedConfiguration = ModelConfiguration(
+            "VaultMail",
+            schema: schema,
+            isStoredInMemoryOnly: false,
+            allowsSave: true,
+            groupContainer: .identifier(AppConstants.sharedAppGroupIdentifier)
+        )
+        migrateLegacyStoreIfNeeded(
+            legacyURL: configuration.url,
+            sharedURL: sharedConfiguration.url
+        )
+        do {
+            return try ModelContainer(for: schema, configurations: [sharedConfiguration])
+        } catch {
+            NSLog("[ModelContainer] Shared store open failed, falling back to local store: \(error)")
+        }
+
         do {
             return try ModelContainer(for: schema, configurations: [configuration])
         } catch {
@@ -74,6 +91,33 @@ public enum ModelContainerFactory {
                 try? fileManager.removeItem(at: sourceURL)
             }
         }
+    }
+
+    private static func migrateLegacyStoreIfNeeded(legacyURL: URL, sharedURL: URL) {
+        let fm = FileManager.default
+        let sharedBasePath = sharedURL.path
+        guard fm.fileExists(atPath: sharedBasePath) == false else { return }
+        let legacyBasePath = legacyURL.path
+        guard fm.fileExists(atPath: legacyBasePath) else { return }
+
+        do {
+            try fm.createDirectory(at: sharedURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        } catch {
+            NSLog("[ModelContainer] Failed to create shared store directory: \(error)")
+            return
+        }
+
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let src = legacyBasePath + suffix
+            let dst = sharedBasePath + suffix
+            guard fm.fileExists(atPath: src), fm.fileExists(atPath: dst) == false else { continue }
+            do {
+                try fm.copyItem(atPath: src, toPath: dst)
+            } catch {
+                NSLog("[ModelContainer] Copy-forward migration failed for \(suffix): \(error)")
+            }
+        }
+        NSLog("[ModelContainer] Completed copy-forward migration to shared store")
     }
 }
 

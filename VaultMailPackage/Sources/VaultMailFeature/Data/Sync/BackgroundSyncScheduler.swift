@@ -17,7 +17,7 @@ import BackgroundTasks
 public final class BackgroundSyncScheduler {
 
     /// Background task identifier — must match Info.plist entry.
-    public static let taskIdentifier = "com.vaultmail.app.sync"
+    public static let taskIdentifier = "com.Rajeshdara.vaultmailv.sync"
 
     /// Minimum interval between background syncs (1 minute).
     /// Apple's BGTaskScheduler may still throttle based on battery and usage patterns,
@@ -26,15 +26,18 @@ public final class BackgroundSyncScheduler {
 
     private let syncEmails: SyncEmailsUseCaseProtocol
     private let manageAccounts: ManageAccountsUseCaseProtocol
+    private let settingsStore: SettingsStore
     private let notificationCoordinator: NotificationSyncCoordinator?
 
     public init(
         syncEmails: SyncEmailsUseCaseProtocol,
         manageAccounts: ManageAccountsUseCaseProtocol,
+        settingsStore: SettingsStore,
         notificationCoordinator: NotificationSyncCoordinator? = nil
     ) {
         self.syncEmails = syncEmails
         self.manageAccounts = manageAccounts
+        self.settingsStore = settingsStore
         self.notificationCoordinator = notificationCoordinator
     }
 
@@ -67,6 +70,15 @@ public final class BackgroundSyncScheduler {
     /// each background sync completion.
     public func scheduleNextSync() {
         #if os(iOS)
+        guard settingsStore.backgroundAlertsEnabled else {
+            cancelScheduledSync()
+            NSLog("[BackgroundSync] Skipped scheduling because background alerts are disabled")
+            return
+        }
+
+        // Keep only one pending request to avoid stacked wakes.
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)
+
         let request = BGAppRefreshTaskRequest(identifier: Self.taskIdentifier)
         request.earliestBeginDate = Date().addingTimeInterval(Self.minimumInterval)
 
@@ -79,6 +91,13 @@ public final class BackgroundSyncScheduler {
         #endif
     }
 
+    public func cancelScheduledSync() {
+        #if os(iOS)
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)
+        NSLog("[BackgroundSync] Cancelled pending task request")
+        #endif
+    }
+
     // MARK: - Execution
 
     #if os(iOS)
@@ -87,6 +106,12 @@ public final class BackgroundSyncScheduler {
     /// Performs incremental sync for all active accounts. The sync engine
     /// uses UID-based incremental fetch which is fast enough for background.
     private func handleBackgroundSync(task: BGAppRefreshTask) async {
+        guard settingsStore.backgroundAlertsEnabled else {
+            cancelScheduledSync()
+            task.setTaskCompleted(success: true)
+            return
+        }
+
         // Schedule the next sync before this one finishes
         scheduleNextSync()
 
@@ -108,12 +133,16 @@ public final class BackgroundSyncScheduler {
                         notificationCoordinator?.markFirstLaunchComplete()
                         isFirst = false
                     }
-                    await notificationCoordinator?.didSyncNewEmails(
+                    let report = await notificationCoordinator?.didSyncNewEmailsReporting(
                         result.newEmails,
                         fromBackground: true
                     )
+                    if (report?.deliveredCount ?? 0) > 0 {
+                        settingsStore.lastBackgroundAlertAt = Date()
+                    }
                 }
 
+                settingsStore.lastBackgroundCheckAt = Date()
                 if Task.isCancelled {
                     NSLog("[BackgroundSync] Cancelled before completing all accounts")
                     task.setTaskCompleted(success: false)

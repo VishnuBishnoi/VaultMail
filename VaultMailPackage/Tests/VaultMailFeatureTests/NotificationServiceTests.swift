@@ -76,6 +76,19 @@ struct NotificationServiceTests {
         #expect(center.addedRequests.count == 1)
     }
 
+    @Test("Reporting API returns delivered count for new emails")
+    @MainActor
+    func reportingApiDeliveredCount() async {
+        let (service, _, _, _) = Self.makeService()
+        let email = Self.makeEmail(dateReceived: Date())
+
+        service.markFirstLaunchComplete()
+        let report = await service.processNewEmailsReporting([email], fromBackground: false)
+
+        #expect(report.deliveredCount == 1)
+        #expect(report.suppressedCount == 0)
+    }
+
     // MARK: - Email Filtering
 
     @Test("Read emails are skipped")

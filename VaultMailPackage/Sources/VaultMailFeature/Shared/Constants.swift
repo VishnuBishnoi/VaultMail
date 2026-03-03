@@ -116,4 +116,19 @@ public enum AppConstants {
     public static let backgroundNotificationRecencySeconds = 900
     /// Recency threshold for foreground sync notifications (seconds). Emails older than this are suppressed.
     public static let foregroundNotificationRecencySeconds = 120
+
+    // MARK: - Background Helper (macOS)
+
+    /// Feature flag for login-item helper rollout on macOS.
+    public static var macLoginItemHelperFeatureEnabled: Bool {
+        ProcessInfo.processInfo.environment["VAULTMAIL_DISABLE_MAC_HELPER"] != "1"
+    }
+    /// Polling interval used by helper when app heartbeat is stale.
+    public static let macHelperPollIntervalSeconds: TimeInterval = 10 * 60
+    /// App-group identifier shared between main app and helper.
+    public static let sharedAppGroupIdentifier = "group.com.Rajeshdara.vaultmailv"
+    /// Keychain access-group identifier shared between main app and helper.
+    public static let sharedKeychainAccessGroup = "com.Rajeshdara.vaultmailv.shared"
+    /// Bundle identifier for login-item helper app.
+    public static let macLoginItemBundleIdentifier = "com.Rajeshdara.vaultmailv.MailBackgroundHelper"
 }

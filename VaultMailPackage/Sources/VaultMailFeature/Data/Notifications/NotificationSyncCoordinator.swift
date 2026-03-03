@@ -30,6 +30,12 @@ public final class NotificationSyncCoordinator {
         await notificationService.processNewEmails(emails, fromBackground: fromBackground)
     }
 
+    /// Called after a sync completes and returns delivery counts for diagnostics.
+    @discardableResult
+    public func didSyncNewEmailsReporting(_ emails: [Email] = [], fromBackground: Bool) async -> NotificationDeliveryReport {
+        await notificationService.processNewEmailsReporting(emails, fromBackground: fromBackground)
+    }
+
     /// Called when a thread is marked as read.
     public func didMarkThreadRead(threadId: String) async {
         await notificationService.removeNotifications(forThreadId: threadId)

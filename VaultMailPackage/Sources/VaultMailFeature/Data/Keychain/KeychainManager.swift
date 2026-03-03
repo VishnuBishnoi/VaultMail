@@ -24,6 +24,7 @@ import Security
 public actor KeychainManager: KeychainManagerProtocol {
 
     private let service: String
+    private let accessGroup: String?
 
     /// Whether to use the Data Protection keychain (`true`) or legacy (`false`).
     private let useDataProtection: Bool
@@ -34,9 +35,24 @@ public actor KeychainManager: KeychainManagerProtocol {
     /// Creates a KeychainManager with a configurable service name.
     /// - Parameter service: Keychain service identifier. Defaults to production value.
     ///   Use a unique value in tests for isolation.
-    public init(service: String = "com.vaultmail.oauth") {
+    public init(
+        service: String = "com.vaultmail.oauth",
+        accessGroup: String? = nil
+    ) {
         self.service = service
-        self.useDataProtection = Self.probeDataProtectionKeychain(service: service)
+        self.accessGroup = accessGroup
+        self.useDataProtection = Self.probeDataProtectionKeychain(service: service, accessGroup: accessGroup)
+    }
+
+    /// Resolves the first keychain access group from app entitlements at runtime.
+    /// This avoids hardcoding Team ID prefixes in source.
+    public nonisolated static func entitlementAccessGroup() -> String? {
+        guard let task = SecTaskCreateFromSelf(nil) else { return nil }
+        guard let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil) else {
+            return nil
+        }
+        let groups = value as? [String]
+        return groups?.first
     }
 
     // MARK: - AccountCredential API (primary)
@@ -45,13 +61,24 @@ public actor KeychainManager: KeychainManagerProtocol {
         let data = try encodeCredential(credential)
         let svc = service
         let useDp = useDataProtection
+        let accessGroup = accessGroup
 
         let status: OSStatus = await withCheckedContinuation { continuation in
             secItemQueue.async {
-                var deleteQuery = Self.makeQuery(service: svc, accountId: accountId, useDataProtection: useDp)
+                let deleteQuery = Self.makeQuery(
+                    service: svc,
+                    accountId: accountId,
+                    useDataProtection: useDp,
+                    accessGroup: accessGroup
+                )
                 SecItemDelete(deleteQuery as CFDictionary)
 
-                var addQuery = Self.makeQuery(service: svc, accountId: accountId, useDataProtection: useDp)
+                var addQuery = Self.makeQuery(
+                    service: svc,
+                    accountId: accountId,
+                    useDataProtection: useDp,
+                    accessGroup: accessGroup
+                )
                 addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
                 addQuery[kSecValueData as String] = data
 
@@ -68,10 +95,16 @@ public actor KeychainManager: KeychainManagerProtocol {
     public func retrieveCredential(for accountId: String) async throws -> AccountCredential? {
         let svc = service
         let useDp = useDataProtection
+        let accessGroup = accessGroup
 
         let (status, data): (OSStatus, Data?) = await withCheckedContinuation { continuation in
             secItemQueue.async {
-                var query = Self.makeQuery(service: svc, accountId: accountId, useDataProtection: useDp)
+                var query = Self.makeQuery(
+                    service: svc,
+                    accountId: accountId,
+                    useDataProtection: useDp,
+                    accessGroup: accessGroup
+                )
                 query[kSecReturnData as String] = true
                 query[kSecMatchLimit as String] = kSecMatchLimitOne
 
@@ -82,6 +115,13 @@ public actor KeychainManager: KeychainManagerProtocol {
         }
 
         if status == errSecItemNotFound {
+            // Backward-compat migration path: if we now use a shared access group,
+            // try reading the legacy non-access-group key and copy it forward.
+            if accessGroup != nil, let legacyData = await retrieveLegacyCredentialData(accountId: accountId) {
+                let credential = try decodeCredential(legacyData)
+                try await storeCredential(credential, for: accountId)
+                return credential
+            }
             return nil
         }
 
@@ -95,10 +135,16 @@ public actor KeychainManager: KeychainManagerProtocol {
     public func deleteCredential(for accountId: String) async throws {
         let svc = service
         let useDp = useDataProtection
+        let accessGroup = accessGroup
 
         let status: OSStatus = await withCheckedContinuation { continuation in
             secItemQueue.async {
-                let query = Self.makeQuery(service: svc, accountId: accountId, useDataProtection: useDp)
+                let query = Self.makeQuery(
+                    service: svc,
+                    accountId: accountId,
+                    useDataProtection: useDp,
+                    accessGroup: accessGroup
+                )
                 let st = SecItemDelete(query as CFDictionary)
                 continuation.resume(returning: st)
             }
@@ -107,6 +153,22 @@ public actor KeychainManager: KeychainManagerProtocol {
         // Ignore "not found" — deleting something that doesn't exist is fine
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.unableToDelete(status)
+        }
+
+        // Also best-effort delete legacy non-group entry during migration period.
+        if accessGroup != nil {
+            let _: OSStatus = await withCheckedContinuation { continuation in
+                secItemQueue.async {
+                    let legacyQuery = Self.makeQuery(
+                        service: svc,
+                        accountId: accountId,
+                        useDataProtection: useDp,
+                        accessGroup: nil
+                    )
+                    let st = SecItemDelete(legacyQuery as CFDictionary)
+                    continuation.resume(returning: st)
+                }
+            } as OSStatus
         }
     }
 
@@ -120,7 +182,12 @@ public actor KeychainManager: KeychainManagerProtocol {
 
     /// Builds a base keychain query dictionary.
     /// Static so it can be called from `@Sendable` closures without capturing `self`.
-    private static func makeQuery(service: String, accountId: String, useDataProtection: Bool) -> [String: Any] {
+    private static func makeQuery(
+        service: String,
+        accountId: String,
+        useDataProtection: Bool,
+        accessGroup: String?
+    ) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -128,6 +195,9 @@ public actor KeychainManager: KeychainManagerProtocol {
         ]
         if useDataProtection {
             query[kSecUseDataProtectionKeychain as String] = true
+        }
+        if let accessGroup {
+            query[kSecAttrAccessGroup as String] = accessGroup
         }
         return query
     }
@@ -139,7 +209,7 @@ public actor KeychainManager: KeychainManagerProtocol {
     /// Attempts a test write/delete cycle. If `SecItemAdd` returns
     /// `errSecMissingEntitlement` (-34018), the app lacks proper signing
     /// and we fall back to the legacy keychain.
-    private static func probeDataProtectionKeychain(service: String) -> Bool {
+    private static func probeDataProtectionKeychain(service: String, accessGroup: String?) -> Bool {
         #if os(iOS) || os(watchOS) || os(tvOS) || os(visionOS)
         // iOS always uses Data Protection keychain
         return true
@@ -155,6 +225,9 @@ public actor KeychainManager: KeychainManagerProtocol {
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
             kSecValueData as String: testData,
         ]
+        if let accessGroup {
+            query[kSecAttrAccessGroup as String] = accessGroup
+        }
 
         let status = SecItemAdd(query as CFDictionary, nil)
 
@@ -199,6 +272,31 @@ public actor KeychainManager: KeychainManagerProtocol {
             return .oauth(token)
         } catch {
             throw KeychainError.decodingFailed
+        }
+    }
+
+    private func retrieveLegacyCredentialData(accountId: String) async -> Data? {
+        let svc = service
+        let useDp = useDataProtection
+        return await withCheckedContinuation { continuation in
+            secItemQueue.async {
+                var query = Self.makeQuery(
+                    service: svc,
+                    accountId: accountId,
+                    useDataProtection: useDp,
+                    accessGroup: nil
+                )
+                query[kSecReturnData as String] = true
+                query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+                var result: AnyObject?
+                let status = SecItemCopyMatching(query as CFDictionary, &result)
+                if status == errSecSuccess {
+                    continuation.resume(returning: result as? Data)
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
         }
     }
 }

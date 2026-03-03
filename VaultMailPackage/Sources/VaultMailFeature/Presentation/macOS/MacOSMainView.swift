@@ -15,6 +15,7 @@ public struct MacOSMainView: View {
     @Environment(ThemeProvider.self) private var theme
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(NotificationSyncCoordinator.self) private var notificationCoordinator
 
     // MARK: - Use Cases (injected from ContentView)
@@ -243,10 +244,23 @@ public struct MacOSMainView: View {
             .task {
                 await initialLoad()
             }
+            .task {
+                while !Task.isCancelled {
+                    if scenePhase == .active {
+                        settings.mainAppHeartbeatAt = Date()
+                    }
+                    try? await Task.sleep(for: .seconds(30))
+                }
+            }
     }
 
     private func applyInteractionModifiers<Content: View>(to view: Content) -> some View {
         view
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    settings.mainAppHeartbeatAt = Date()
+                }
+            }
             .onChange(of: selectedCategory) {
                 resetPaginationState()
                 Task { await reloadThreads() }
