@@ -47,12 +47,27 @@ public actor KeychainManager: KeychainManagerProtocol {
     /// Resolves the first keychain access group from app entitlements at runtime.
     /// This avoids hardcoding Team ID prefixes in source.
     public nonisolated static func entitlementAccessGroup() -> String? {
+        #if os(iOS) || os(tvOS) || os(watchOS)
+        #if targetEnvironment(simulator)
+        // Simulator signing often lacks a stable app-identifier prefix for shared
+        // keychain groups; default keychain works best for local testing.
+        return nil
+        #else
+        // Build a fully qualified access group (TeamID + group suffix).
+        if let prefix = Bundle.main.object(forInfoDictionaryKey: "AppIdentifierPrefix") as? String,
+           !prefix.isEmpty {
+            return "\(prefix)\(AppConstants.sharedKeychainAccessGroup)"
+        }
+        return nil
+        #endif
+        #else
         guard let task = SecTaskCreateFromSelf(nil) else { return nil }
         guard let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil) else {
             return nil
         }
         let groups = value as? [String]
         return groups?.first
+        #endif
     }
 
     // MARK: - AccountCredential API (primary)
@@ -210,7 +225,7 @@ public actor KeychainManager: KeychainManagerProtocol {
     /// `errSecMissingEntitlement` (-34018), the app lacks proper signing
     /// and we fall back to the legacy keychain.
     private static func probeDataProtectionKeychain(service: String, accessGroup: String?) -> Bool {
-        #if os(iOS) || os(watchOS) || os(tvOS) || os(visionOS)
+        #if os(iOS) || os(watchOS) || os(tvOS)
         // iOS always uses Data Protection keychain
         return true
         #else

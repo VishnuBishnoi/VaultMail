@@ -10,7 +10,7 @@
 		8B41F6832DEDD23B001A66F9 /* VaultMailFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 8B41F6822DEDD23B001A66F9 /* VaultMailFeature */; };
 		8B41F6852DEDD25C001A66F9 /* VaultMailFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 8B41F6842DEDD25C001A66F9 /* VaultMailFeature */; };
 		A1A1A1A12F40000100AA0001 /* VaultMailFeature in Frameworks */ = {isa = PBXBuildFile; productRef = A1A1A1A12F40000100AA0010 /* VaultMailFeature */; };
-		A1A1A1A12F40000100AA0002 /* MailBackgroundHelper.app in Embed Login Item */ = {isa = PBXBuildFile; fileRef = A1A1A1A12F40000100AA0004 /* MailBackgroundHelper.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		A1A1A1A12F40000100AA0002 /* MailBackgroundHelper.app in Embed Login Item */ = {isa = PBXBuildFile; fileRef = A1A1A1A12F40000100AA0004 /* MailBackgroundHelper.app */; platformFilters = (macos, ); settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -40,6 +40,7 @@
 				A1A1A1A12F40000100AA0002 /* MailBackgroundHelper.app in Embed Login Item */,
 			);
 			name = "Embed Login Item";
+			platformFilters = (macos, );
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -344,6 +345,7 @@
 		};
 		A1A1A1A12F40000100AA000C /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilters = (macos, );
 			target = A1A1A1A12F40000100AA0009 /* MailBackgroundHelper */;
 			targetProxy = A1A1A1A12F40000100AA0003 /* PBXContainerItemProxy */;
 		};
@@ -588,6 +590,7 @@
 				PRODUCT_NAME = MailBackgroundHelper;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = macosx;
 				SUPPORTS_MACCATALYST = NO;
@@ -619,6 +622,7 @@
 				PRODUCT_NAME = MailBackgroundHelper;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = macosx;
 				SUPPORTS_MACCATALYST = NO;
