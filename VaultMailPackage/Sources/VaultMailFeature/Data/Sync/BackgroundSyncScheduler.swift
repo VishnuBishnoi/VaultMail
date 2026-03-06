@@ -53,6 +53,7 @@ public final class BackgroundSyncScheduler {
             forTaskWithIdentifier: Self.taskIdentifier,
             using: nil
         ) { task in
+            NSLog("[BackgroundSync] Launch callback fired for identifier: \(Self.taskIdentifier)")
             guard let appRefreshTask = task as? BGAppRefreshTask else { return }
             Task { @MainActor in
                 await self.handleBackgroundSync(task: appRefreshTask)
@@ -86,7 +87,16 @@ public final class BackgroundSyncScheduler {
             try BGTaskScheduler.shared.submit(request)
             NSLog("[BackgroundSync] Scheduled next sync in \(Int(Self.minimumInterval / 60)) minutes")
         } catch {
+            let nsError = error as NSError
+            #if targetEnvironment(simulator)
+            if nsError.domain == BGTaskScheduler.errorDomain && nsError.code == 1 {
+                NSLog("[BackgroundSync] Scheduler unavailable on Simulator (expected). Use LLDB _simulateLaunchForTaskWithIdentifier for testing.")
+            } else {
+                NSLog("[BackgroundSync] Failed to schedule on Simulator: \(error)")
+            }
+            #else
             NSLog("[BackgroundSync] Failed to schedule: \(error)")
+            #endif
         }
         #endif
     }
@@ -106,9 +116,15 @@ public final class BackgroundSyncScheduler {
     /// Performs incremental sync for all active accounts. The sync engine
     /// uses UID-based incremental fetch which is fast enough for background.
     private func handleBackgroundSync(task: BGAppRefreshTask) async {
+        NSLog("[BackgroundSync] handleBackgroundSync started")
+        func completeTask(success: Bool, reason: String) {
+            NSLog("[BackgroundSync] Completing task success=\(success) reason=\(reason)")
+            task.setTaskCompleted(success: success)
+        }
+
         guard settingsStore.backgroundAlertsEnabled else {
             cancelScheduledSync()
-            task.setTaskCompleted(success: true)
+            completeTask(success: true, reason: "background alerts disabled")
             return
         }
 
@@ -117,13 +133,36 @@ public final class BackgroundSyncScheduler {
 
         // Set up expiration handler
         let syncTask = Task { @MainActor in
-            do {
-                let accounts = try await manageAccounts.getAccounts()
-                let activeAccounts = accounts.filter { $0.isActive }
+            await self.performBackgroundSyncWork()
+        }
 
-                var isFirst = true
-                for account in activeAccounts {
-                    guard !Task.isCancelled else { break }
+        // If iOS kills the task (budget exceeded), cancel gracefully
+        task.expirationHandler = {
+            syncTask.cancel()
+            NSLog("[BackgroundSync] Expired — cancelled sync task")
+        }
+
+        let result = await syncTask.value
+        completeTask(success: result.success, reason: result.reason)
+    }
+
+    private func performBackgroundSyncWork() async -> (success: Bool, reason: String) {
+        do {
+            let accounts = try await manageAccounts.getAccounts()
+            let activeAccounts = accounts.filter { $0.isActive }
+            if activeAccounts.isEmpty {
+                return (true, "no active accounts")
+            }
+
+            var isFirst = true
+            var skippedAccounts = 0
+            for account in activeAccounts {
+                guard !Task.isCancelled else {
+                    NSLog("[BackgroundSync] Cancelled before completing all accounts")
+                    return (false, "sync task cancelled")
+                }
+
+                do {
                     let result = try await syncEmails.syncAccount(
                         accountId: account.id,
                         options: .incremental
@@ -140,28 +179,31 @@ public final class BackgroundSyncScheduler {
                     if (report?.deliveredCount ?? 0) > 0 {
                         settingsStore.lastBackgroundAlertAt = Date()
                     }
+                } catch {
+                    if shouldSkipAccountForCredentialIssue(error) {
+                        skippedAccounts += 1
+                        NSLog("[BackgroundSync] Skipping account \(account.email) due to credential issue: \(error)")
+                        continue
+                    }
+                    throw error
                 }
-
-                settingsStore.lastBackgroundCheckAt = Date()
-                if Task.isCancelled {
-                    NSLog("[BackgroundSync] Cancelled before completing all accounts")
-                    task.setTaskCompleted(success: false)
-                } else {
-                    task.setTaskCompleted(success: true)
-                }
-            } catch {
-                NSLog("[BackgroundSync] Failed: \(error)")
-                task.setTaskCompleted(success: false)
             }
-        }
 
-        // If iOS kills the task (budget exceeded), cancel gracefully
-        task.expirationHandler = {
-            syncTask.cancel()
-            NSLog("[BackgroundSync] Expired — cancelled sync task")
+            settingsStore.lastBackgroundCheckAt = Date()
+            if skippedAccounts > 0 {
+                return (true, "sync finished with \(skippedAccounts) skipped account(s)")
+            }
+            return (true, "sync finished")
+        } catch {
+            NSLog("[BackgroundSync] Failed: \(error)")
+            return (false, "sync failed")
         }
+    }
 
-        await syncTask.value
+    private func shouldSkipAccountForCredentialIssue(_ error: Error) -> Bool {
+        guard case .tokenRefreshFailed(let reason) = error as? SyncError else { return false }
+        return reason.contains("No credentials found for account")
+            || reason.contains("OAuth token expired for account")
     }
     #endif
 }
