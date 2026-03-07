@@ -40,7 +40,6 @@
 				A1A1A1A12F40000100AA0002 /* MailBackgroundHelper.app in Embed Login Item */,
 			);
 			name = "Embed Login Item";
-			platformFilters = (macos, );
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -345,7 +344,9 @@
 		};
 		A1A1A1A12F40000100AA000C /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			platformFilters = (macos, );
+			platformFilters = (
+				macos,
+			);
 			target = A1A1A1A12F40000100AA0009 /* MailBackgroundHelper */;
 			targetProxy = A1A1A1A12F40000100AA0003 /* PBXContainerItemProxy */;
 		};
@@ -572,6 +573,7 @@
 			baseConfigurationReferenceAnchor = 8BD71C052DEE41D800CEDD92 /* Config */;
 			baseConfigurationReferenceRelativePath = Debug.xcconfig;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = MailBackgroundHelper/MailBackgroundHelper.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
@@ -604,6 +606,7 @@
 			baseConfigurationReferenceAnchor = 8BD71C052DEE41D800CEDD92 /* Config */;
 			baseConfigurationReferenceRelativePath = Release.xcconfig;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = MailBackgroundHelper/MailBackgroundHelper.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
