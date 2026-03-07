@@ -428,6 +428,20 @@ public struct EmailDetailView: View {
             }
             .accessibilityLabel("Reply")
 
+            Button {
+                openComposer { .replyAll(email: $0) }
+            } label: {
+                Image(systemName: "arrowshape.turn.up.left.2")
+            }
+            .accessibilityLabel("Reply All")
+
+            Button {
+                openComposer { .forward(email: $0) }
+            } label: {
+                Image(systemName: "arrowshape.turn.up.right")
+            }
+            .accessibilityLabel("Forward")
+
             Menu {
                 Button(role: .destructive) {
                     Task { await archiveThread() }

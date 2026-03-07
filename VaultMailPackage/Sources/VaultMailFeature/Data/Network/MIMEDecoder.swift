@@ -126,10 +126,16 @@ enum MIMEDecoder {
     /// - `=\r\n` is a soft line break (remove it)
     /// - Lines should not exceed 76 characters
     private static func decodeQuotedPrintableBody(_ text: String, charset: String) -> String {
-        // Remove soft line breaks: =\r\n or =\n
-        let noSoftBreaks = text
+        // Remove soft line breaks: =\r\n, =\n, or =\r.
+        // Some IMAP responses trim trailing newlines, leaving a dangling
+        // terminal "=" from a soft wrap; drop it as well.
+        var noSoftBreaks = text
             .replacingOccurrences(of: "=\r\n", with: "")
             .replacingOccurrences(of: "=\n", with: "")
+            .replacingOccurrences(of: "=\r", with: "")
+        while noSoftBreaks.hasSuffix("=") {
+            noSoftBreaks.removeLast()
+        }
         let bytes = decodeQuotedPrintableBytes(noSoftBreaks)
         return stringFromBytes(bytes, charset: charset)
     }
@@ -191,9 +197,13 @@ enum MIMEDecoder {
     ///
     /// Spec ref: FR-SYNC-08 (Attachment download)
     static func decodeQuotedPrintableToData(_ text: String) -> Data {
-        let noSoftBreaks = text
+        var noSoftBreaks = text
             .replacingOccurrences(of: "=\r\n", with: "")
             .replacingOccurrences(of: "=\n", with: "")
+            .replacingOccurrences(of: "=\r", with: "")
+        while noSoftBreaks.hasSuffix("=") {
+            noSoftBreaks.removeLast()
+        }
         let bytes = decodeQuotedPrintableBytes(noSoftBreaks)
         return Data(bytes)
     }

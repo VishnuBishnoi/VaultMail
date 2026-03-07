@@ -612,6 +612,22 @@ struct HTMLSanitizerTests {
         #expect(result.html.contains("Normal email content"))
     }
 
+    @Test("Sanitize removes quoted-printable dangling equals before closing tags")
+    func sanitizeRemovesQPDanglingEqualsBeforeTag() {
+        let html = "<p>Click <a href=\"https://example.com\">here</a> to unsubscribe=</p>"
+        let result = HTMLSanitizer.sanitize(html)
+        #expect(result.html.contains("to unsubscribe</p>"))
+        #expect(!result.html.contains("unsubscribe=</p>"))
+    }
+
+    @Test("Sanitize removes quoted-printable terminal dangling equals")
+    func sanitizeRemovesQPTerminalEquals() {
+        let html = "<p>Click here to unsubscribe="
+        let result = HTMLSanitizer.sanitize(html)
+        #expect(result.html.contains("unsubscribe"))
+        #expect(!result.html.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("="))
+    }
+
     // MARK: - Fixed Width Attribute Neutralization
 
     @Test("Strips large fixed-width HTML attributes from tables")

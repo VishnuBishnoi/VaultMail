@@ -125,6 +125,8 @@ public enum HTMLSanitizer {
 
         // --- Phase 0b: Strip raw MIME multipart framing ---
         result = MIMEDecoder.stripMIMEFramingForHTML(result)
+        // --- Phase 0c: Clean quoted-printable soft-break artifacts ---
+        result = stripQuotedPrintableSoftBreakArtifacts(result)
 
         // --- Phase 1: Strip tags WITH their content ---
         result = stripTagsWithContent(result, tags: ["script", "noscript"])
@@ -366,6 +368,35 @@ public enum HTMLSanitizer {
                 options: [.regularExpression, .caseInsensitive]
             )
         }
+        return result
+    }
+
+    /// Removes quoted-printable soft-wrap artifacts that can leak into rendered
+    /// HTML when line endings were normalized before decode.
+    ///
+    /// Examples:
+    /// - `"...unsubscribe=\r\n</p>"` -> `"...unsubscribe</p>"`
+    /// - `"...unsubscribe="` -> `"...unsubscribe"`
+    private static func stripQuotedPrintableSoftBreakArtifacts(_ html: String) -> String {
+        var result = html
+            .replacingOccurrences(of: "=\r\n", with: "")
+            .replacingOccurrences(of: "=\n", with: "")
+            .replacingOccurrences(of: "=\r", with: "")
+
+        // If a dangling '=' survived before a tag boundary, drop it.
+        result = result.replacingOccurrences(
+            of: "=\\s*</",
+            with: "</",
+            options: [.regularExpression, .caseInsensitive]
+        )
+
+        // Drop a terminal dangling '=' that appears at end-of-document.
+        result = result.replacingOccurrences(
+            of: "=\\s*$",
+            with: "",
+            options: .regularExpression
+        )
+
         return result
     }
 
