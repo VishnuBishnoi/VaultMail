@@ -75,11 +75,12 @@ public final class FetchEmailDetailUseCase: FetchEmailDetailUseCaseProtocol {
 
         // Group emails by account for efficient connection reuse
         let emailsByAccount = Dictionary(grouping: needsBodies) { $0.accountId }
+        let accounts = try await accountRepository.getAccounts()
+        let accountsById = Dictionary(accounts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var fetchedCount = 0
 
         for (accountId, accountEmails) in emailsByAccount {
-            let accounts = try await accountRepository.getAccounts()
-            guard let account = accounts.first(where: { $0.id == accountId }) else { continue }
+            guard let account = accountsById[accountId] else { continue }
 
             let imapCredential: IMAPCredential
             do {

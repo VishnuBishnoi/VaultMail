@@ -132,7 +132,7 @@ public struct EmailDetailView: View {
         #endif
         .toolbar { toolbarContent }
         .task(id: threadId) { await loadThread() }
-        .task(id: thread?.id) { await loadSmartReplies() }
+        .task(id: thread?.id, priority: .background) { await loadSmartReplies() }
         .overlay(alignment: .bottom) {
             if showUndoToast, let action = undoAction {
                 undoToastView(action: action)
@@ -504,11 +504,7 @@ public struct EmailDetailView: View {
 
     private func loadThread() async {
         viewState = .loading
-
-        // Load trusted senders (FR-ED-04)
-        if let senders = try? await fetchEmailDetail.getAllTrustedSenderEmails() {
-            trustedSenderEmails = senders
-        }
+        let trustedSendersTask = Task { try? await fetchEmailDetail.getAllTrustedSenderEmails() }
 
         do {
             let loadedThread = try await fetchEmailDetail.fetchThread(threadId: threadId)
@@ -555,6 +551,10 @@ public struct EmailDetailView: View {
 
             viewState = .loaded
 
+            if let senders = await trustedSendersTask.value {
+                trustedSenderEmails = senders
+            }
+
             // Mark as read (FR-ED-01: immediate on open)
             await markAllRead()
 
@@ -571,6 +571,10 @@ public struct EmailDetailView: View {
             }
         } catch {
             viewState = .error(error.localizedDescription)
+        }
+
+        if trustedSenderEmails.isEmpty, let senders = await trustedSendersTask.value {
+            trustedSenderEmails = senders
         }
     }
 

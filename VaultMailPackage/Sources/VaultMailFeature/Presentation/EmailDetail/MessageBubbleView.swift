@@ -393,20 +393,16 @@ struct MessageBubbleView: View {
         if isNewBaseContent {
             // Cache miss — run the full expensive pipeline
 
-            // Determine HTML source: prefer bodyHTML, but also check bodyPlain
-            // for raw MIME multipart content that may contain an HTML part
-            // (happens when BODYSTRUCTURE parsing failed during sync).
-            var htmlSource = email.bodyHTML
+            let baseResult = await MessageBodyProcessor.shared.buildBaseHTML(
+                bodyHTML: email.bodyHTML,
+                bodyPlain: email.bodyPlain,
+                shouldLoadRemote: shouldLoadRemote,
+                blockTrackingPixels: settingsStore.blockTrackingPixels
+            )
 
-            if (htmlSource == nil || htmlSource?.isEmpty == true),
-               let plainBody = email.bodyPlain,
-               MIMEDecoder.isMultipartContent(plainBody),
-               let multipart = MIMEDecoder.parseMultipartBody(plainBody),
-               let mimeHTML = multipart.htmlText, !mimeHTML.isEmpty {
-                htmlSource = mimeHTML
-            }
+            guard !Task.isCancelled else { return }
 
-            guard let htmlBody = htmlSource, !htmlBody.isEmpty else {
+            guard let baseResult else {
                 processedHTML = nil
                 baseProcessedHTML = nil
                 baseCacheKey = nil
@@ -417,31 +413,12 @@ struct MessageBubbleView: View {
                 return
             }
 
-            // Step 1: Sanitize (uses HTMLSanitizer's own internal cache)
-            let sanitized = HTMLSanitizer.sanitize(
-                htmlBody,
-                loadRemoteImages: shouldLoadRemote
-            )
-            hasBlockedRemoteContent = sanitized.hasBlockedRemoteContent
-            remoteImageCount = sanitized.remoteImageCount
-
-            // Step 2: Strip tracking pixels (only when enabled in settings)
-            let htmlAfterTracking: String
-            if settingsStore.blockTrackingPixels {
-                let tracked = TrackingPixelDetector.detect(in: sanitized.html)
-                trackerCount = tracked.trackerCount
-                htmlAfterTracking = tracked.sanitizedHTML
-            } else {
-                trackerCount = 0
-                htmlAfterTracking = sanitized.html
-            }
-
-            // Step 3: Detect quoted text
-            let quoted = QuotedTextDetector.detectInHTML(htmlAfterTracking)
-            hasQuotedText = quoted.hasQuotedText
-
-            // Cache the base result — quoted text CSS & Dynamic Type are cheap to apply
-            baseProcessedHTML = quoted.processedHTML
+            hasBlockedRemoteContent = baseResult.hasBlockedRemoteContent
+            remoteImageCount = baseResult.remoteImageCount
+            trackerCount = baseResult.trackerCount
+            hasQuotedText = baseResult.hasQuotedText
+            // Cache the base result — quoted text CSS & Dynamic Type are cheap to apply.
+            baseProcessedHTML = baseResult.processedHTML
             baseCacheKey = currentCacheKey
         }
 
@@ -552,6 +529,74 @@ struct MessageBubbleView: View {
         let status = email.isRead ? "Read" : "Unread"
         let star = email.isStarred ? ", Starred" : ""
         return "\(status) message from \(senderDisplayName), \(formattedDate)\(star)"
+    }
+}
+
+// MARK: - HTML Processing Worker
+
+/// Executes expensive email HTML processing off the main actor to keep
+/// thread-detail rendering responsive while preserving output behavior.
+private actor MessageBodyProcessor {
+    static let shared = MessageBodyProcessor()
+
+    struct BaseResult: Sendable {
+        let processedHTML: String
+        let hasQuotedText: Bool
+        let hasBlockedRemoteContent: Bool
+        let remoteImageCount: Int
+        let trackerCount: Int
+    }
+
+    func buildBaseHTML(
+        bodyHTML: String?,
+        bodyPlain: String?,
+        shouldLoadRemote: Bool,
+        blockTrackingPixels: Bool
+    ) -> BaseResult? {
+        // Determine HTML source: prefer bodyHTML, but also check bodyPlain
+        // for raw MIME multipart content that may contain an HTML part.
+        var htmlSource = bodyHTML
+
+        if (htmlSource == nil || htmlSource?.isEmpty == true),
+           let plainBody = bodyPlain,
+           MIMEDecoder.isMultipartContent(plainBody),
+           let multipart = MIMEDecoder.parseMultipartBody(plainBody),
+           let mimeHTML = multipart.htmlText, !mimeHTML.isEmpty {
+            htmlSource = mimeHTML
+        }
+
+        guard let htmlBody = htmlSource, !htmlBody.isEmpty else {
+            return nil
+        }
+
+        // Step 1: Sanitize (uses HTMLSanitizer's own internal cache)
+        let sanitized = HTMLSanitizer.sanitize(
+            htmlBody,
+            loadRemoteImages: shouldLoadRemote
+        )
+
+        // Step 2: Strip tracking pixels (only when enabled in settings)
+        let htmlAfterTracking: String
+        let trackerCount: Int
+        if blockTrackingPixels {
+            let tracked = TrackingPixelDetector.detect(in: sanitized.html)
+            trackerCount = tracked.trackerCount
+            htmlAfterTracking = tracked.sanitizedHTML
+        } else {
+            trackerCount = 0
+            htmlAfterTracking = sanitized.html
+        }
+
+        // Step 3: Detect quoted text
+        let quoted = QuotedTextDetector.detectInHTML(htmlAfterTracking)
+
+        return BaseResult(
+            processedHTML: quoted.processedHTML,
+            hasQuotedText: quoted.hasQuotedText,
+            hasBlockedRemoteContent: sanitized.hasBlockedRemoteContent,
+            remoteImageCount: sanitized.remoteImageCount,
+            trackerCount: trackerCount
+        )
     }
 }
 
