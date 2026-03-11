@@ -126,9 +126,9 @@ public enum AppConstants {
     /// Polling interval used by helper when app heartbeat is stale.
     public static let macHelperPollIntervalSeconds: TimeInterval = 1 * 60
     /// App-group identifier shared between main app and helper.
-    public static let sharedAppGroupIdentifier = "group.com.Rajeshdara.vaultmailv"
+    public static let sharedAppGroupIdentifier = "group.com.vaultmail.app"
     /// Keychain access-group identifier shared between main app and helper.
-    public static let sharedKeychainAccessGroup = "com.Rajeshdara.vaultmailv.shared"
+    public static let sharedKeychainAccessGroup = "com.vaultmail.app.shared"
     /// Bundle identifier for login-item helper app.
-    public static let macLoginItemBundleIdentifier = "com.Rajeshdara.vaultmailv.MailBackgroundHelper"
+    public static let macLoginItemBundleIdentifier = "com.vaultmail.app.MailBackgroundHelper"
 }

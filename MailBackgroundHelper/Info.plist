@@ -9,7 +9,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>VaultMail Helper</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.Rajeshdara.vaultmailv.MailBackgroundHelper</string>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>LSUIElement</key>
 	<true/>
 </dict>

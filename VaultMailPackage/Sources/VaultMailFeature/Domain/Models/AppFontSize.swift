@@ -21,7 +21,7 @@ public enum AppFontSize: String, Codable, CaseIterable, Sendable {
     /// Scalar applied to theme typography tokens.
     public var scale: CGFloat {
         switch self {
-        case .small: 0.6
+        case .small: 0.85
         case .medium: 0.9
         case .large: 1.1
         case .extraLarge: 1.2

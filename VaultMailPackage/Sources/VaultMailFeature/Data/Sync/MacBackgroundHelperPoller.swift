@@ -7,7 +7,7 @@ import OSLog
 /// duplicate sync work.
 @MainActor
 public final class MacBackgroundHelperPoller {
-    private let logger = Logger(subsystem: "com.Rajeshdara.vaultmailv.MailBackgroundHelper", category: "poller")
+    private let logger = Logger(subsystem: AppConstants.macLoginItemBundleIdentifier, category: "poller")
     private let syncEmails: SyncEmailsUseCaseProtocol
     private let manageAccounts: ManageAccountsUseCaseProtocol
     private let notificationCoordinator: NotificationSyncCoordinator

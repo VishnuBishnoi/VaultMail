@@ -8,7 +8,7 @@
 // ==========================================
 PRODUCT_NAME = VaultMail
 PRODUCT_DISPLAY_NAME = VaultMail
-PRODUCT_BUNDLE_IDENTIFIER = com.Rajeshdara.vaultmailv
+PRODUCT_BUNDLE_IDENTIFIER = com.vaultmail.app
 MARKETING_VERSION = 1.0
 CURRENT_PROJECT_VERSION = 2
 
@@ -29,7 +29,7 @@ INFOPLIST_FILE = VaultMail/Info.plist
 // ==========================================
 // Code Signing
 // ==========================================
-DEVELOPMENT_TEAM = 6AU33VJ4AL
+DEVELOPMENT_TEAM = N7U2DC3WBS
 CODE_SIGN_STYLE = Automatic
 CODE_SIGN_IDENTITY = Apple Development
 

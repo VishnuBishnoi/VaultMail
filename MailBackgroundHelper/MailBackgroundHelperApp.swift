@@ -18,7 +18,7 @@ struct MailBackgroundHelperApp: App {
 
 @MainActor
 private final class HelperAppDelegate: NSObject, NSApplicationDelegate {
-    private let logger = Logger(subsystem: "com.Rajeshdara.vaultmailv.MailBackgroundHelper", category: "lifecycle")
+    private let logger = Logger(subsystem: AppConstants.macLoginItemBundleIdentifier, category: "lifecycle")
     private var runner: MailBackgroundHelperBootstrap?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -45,7 +45,7 @@ private final class HelperAppDelegate: NSObject, NSApplicationDelegate {
 
 @MainActor
 private final class MailBackgroundHelperBootstrap {
-    private let logger = Logger(subsystem: "com.Rajeshdara.vaultmailv.MailBackgroundHelper", category: "bootstrap")
+    private let logger = Logger(subsystem: AppConstants.macLoginItemBundleIdentifier, category: "bootstrap")
     private let poller: MacBackgroundHelperPoller
 
     private init(poller: MacBackgroundHelperPoller) {
@@ -100,7 +100,7 @@ private final class MailBackgroundHelperBootstrap {
             notificationService.registerCategories()
             Task { @MainActor in
                 let bootstrapLogger = Logger(
-                    subsystem: "com.Rajeshdara.vaultmailv.MailBackgroundHelper",
+                    subsystem: AppConstants.macLoginItemBundleIdentifier,
                     category: "bootstrap"
                 )
                 let status = await notificationService.authorizationStatus()
@@ -126,11 +126,11 @@ private final class MailBackgroundHelperBootstrap {
                 notificationCoordinator: coordinator,
                 settingsStore: settingsStore
             )
-            Logger(subsystem: "com.Rajeshdara.vaultmailv.MailBackgroundHelper", category: "bootstrap")
+            Logger(subsystem: AppConstants.macLoginItemBundleIdentifier, category: "bootstrap")
                 .notice("[Helper] Bootstrap complete")
             return MailBackgroundHelperBootstrap(poller: poller)
         } catch {
-            Logger(subsystem: "com.Rajeshdara.vaultmailv.MailBackgroundHelper", category: "bootstrap")
+            Logger(subsystem: AppConstants.macLoginItemBundleIdentifier, category: "bootstrap")
                 .error("[Helper] Bootstrap failed: \(error.localizedDescription, privacy: .public)")
             return nil
         }

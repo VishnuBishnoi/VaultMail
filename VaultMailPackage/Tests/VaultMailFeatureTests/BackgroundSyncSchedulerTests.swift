@@ -112,7 +112,7 @@ struct BackgroundSyncSchedulerTests {
 
     @Test("Task identifier matches Info.plist value")
     func taskIdentifier() {
-        #expect(BackgroundSyncScheduler.taskIdentifier == "com.Rajeshdara.vaultmailv.sync")
+        #expect(BackgroundSyncScheduler.taskIdentifier == "\(Bundle.main.bundleIdentifier ?? "com.vaultmail.app").sync")
     }
 
     @Test("Scheduler initializes with provided dependencies")

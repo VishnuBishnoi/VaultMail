@@ -20,6 +20,7 @@ public enum SyncFolderOptions: Sendable, Equatable {
 }
 
 /// Structured sync result for v1.3.0 API migration.
+/// Kept main-actor bound because it carries SwiftData model objects (`Email`).
 public struct SyncResult {
     /// Newly persisted emails for this invocation.
     public let newEmails: [Email]
@@ -217,6 +218,7 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
     private let connectionProvider: ConnectionProviding
     private let folderSyncCoordinator: FolderSyncCoordinator
     private var catchUpTasks: [String: Task<Void, Never>] = [:]
+    private var activeAccountSyncs: Set<String> = []
 
     /// Batch size for IMAP FETCH commands to avoid oversized responses.
     private let fetchBatchSize = 50
@@ -239,6 +241,12 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
 
     @discardableResult
     public func syncAccount(accountId: String, options: SyncAccountOptions) async throws -> SyncResult {
+        guard activeAccountSyncs.insert(accountId).inserted else {
+            NSLog("[Sync] Skipping duplicate sync for accountId=\(accountId)")
+            return SyncResult(newEmails: [], accountOptions: options)
+        }
+        defer { activeAccountSyncs.remove(accountId) }
+
         switch options {
         case .full:
             let emails = try await syncAccount(accountId: accountId)

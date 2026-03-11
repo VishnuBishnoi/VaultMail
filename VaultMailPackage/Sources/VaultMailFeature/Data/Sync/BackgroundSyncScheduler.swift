@@ -17,7 +17,10 @@ import BackgroundTasks
 public final class BackgroundSyncScheduler {
 
     /// Background task identifier — must match Info.plist entry.
-    public static let taskIdentifier = "com.Rajeshdara.vaultmailv.sync"
+    /// Derived from the runtime bundle identifier to avoid config drift.
+    public static var taskIdentifier: String {
+        "\(Bundle.main.bundleIdentifier ?? "com.vaultmail.app").sync"
+    }
 
     /// Minimum interval between background syncs (1 minute).
     /// Apple's BGTaskScheduler may still throttle based on battery and usage patterns,
