@@ -1004,6 +1004,8 @@ public final class SyncEmailsUseCase: SyncEmailsUseCaseProtocol {
         operation: () async throws -> T
     ) async throws -> T {
         await folderSyncCoordinator.acquire(accountId: accountId, folderId: folderId)
+        // Every path must release the per-folder lock; keep release mirrored in
+        // both success and failure branches because `defer` cannot `await`.
         do {
             let result = try await operation()
             await folderSyncCoordinator.release(accountId: accountId, folderId: folderId)

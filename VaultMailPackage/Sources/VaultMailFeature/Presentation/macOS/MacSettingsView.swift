@@ -119,7 +119,7 @@ public struct MacSettingsView: View {
         do {
             accounts = try await manageAccounts.getAccounts()
         } catch {
-            // Silently handle
+            NSLog("[MacSettings] Failed to load accounts: \(error.localizedDescription)")
         }
     }
 }
@@ -325,7 +325,7 @@ struct MacAccountsSettingsTab: View {
                 selectedAccountID = first.id
             }
         } catch {
-            // Silently handle
+            NSLog("[MacSettings] Failed to load accounts in accounts tab: \(error.localizedDescription)")
         }
     }
 

@@ -384,6 +384,8 @@ public enum HTMLSanitizer {
             .replacingOccurrences(of: "=\r", with: "")
 
         // If a dangling '=' survived before a tag boundary, drop it.
+        // Trade-off: this may also trim rare malformed attribute values like
+        // "value= </span>", but those are uncommon in real email HTML.
         result = result.replacingOccurrences(
             of: "=\\s*</",
             with: "</",

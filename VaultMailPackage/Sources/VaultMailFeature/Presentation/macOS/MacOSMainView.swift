@@ -405,25 +405,13 @@ public struct MacOSMainView: View {
             onToggleStar: { thread in Task { await toggleStar(thread) } },
             onMoveToFolder: { _ in /* show move sheet */ },
             onReply: { threadId in
-                let accountId = selectedAccount?.id ?? accounts.first?.id ?? ""
-                composerMode = .reply(email: ComposerEmailContext(
-                    emailId: threadId, accountId: accountId, threadId: threadId,
-                    messageId: "", fromAddress: "", subject: ""
-                ))
+                openComposer(.reply, forThreadId: threadId)
             },
             onReplyAll: { threadId in
-                let accountId = selectedAccount?.id ?? accounts.first?.id ?? ""
-                composerMode = .replyAll(email: ComposerEmailContext(
-                    emailId: threadId, accountId: accountId, threadId: threadId,
-                    messageId: "", fromAddress: "", subject: ""
-                ))
+                openComposer(.replyAll, forThreadId: threadId)
             },
             onForward: { threadId in
-                let accountId = selectedAccount?.id ?? accounts.first?.id ?? ""
-                composerMode = .forward(email: ComposerEmailContext(
-                    emailId: threadId, accountId: accountId, threadId: threadId,
-                    messageId: "", fromAddress: "", subject: ""
-                ))
+                openComposer(.forward, forThreadId: threadId)
             }
         )
         .navigationTitle(navigationTitle)
@@ -502,7 +490,7 @@ public struct MacOSMainView: View {
     private var macToolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .automatic) {
             Button {
-                composerMode = .new(accountId: selectedAccount?.id ?? accounts.first?.id ?? "")
+                openComposer(.new, forThreadId: nil)
             } label: {
                 Label("Compose", systemImage: "square.and.pencil")
             }
@@ -589,35 +577,23 @@ public struct MacOSMainView: View {
     private func updateCommandState() {
         commandState.hasSelection = selectedThreadID != nil
 
-        commandState.onCompose = { [accounts, selectedAccount] in
-            composerMode = .new(accountId: selectedAccount?.id ?? accounts.first?.id ?? "")
+        commandState.onCompose = {
+            openComposer(.new, forThreadId: nil)
         }
 
-        commandState.onReply = { [selectedThreadID, selectedAccount, accounts] in
+        commandState.onReply = { [selectedThreadID] in
             guard let threadId = selectedThreadID else { return }
-            let accountId = selectedAccount?.id ?? accounts.first?.id ?? ""
-            composerMode = .reply(email: ComposerEmailContext(
-                emailId: threadId, accountId: accountId, threadId: threadId,
-                messageId: "", fromAddress: "", subject: ""
-            ))
+            openComposer(.reply, forThreadId: threadId)
         }
 
-        commandState.onReplyAll = { [selectedThreadID, selectedAccount, accounts] in
+        commandState.onReplyAll = { [selectedThreadID] in
             guard let threadId = selectedThreadID else { return }
-            let accountId = selectedAccount?.id ?? accounts.first?.id ?? ""
-            composerMode = .replyAll(email: ComposerEmailContext(
-                emailId: threadId, accountId: accountId, threadId: threadId,
-                messageId: "", fromAddress: "", subject: ""
-            ))
+            openComposer(.replyAll, forThreadId: threadId)
         }
 
-        commandState.onForward = { [selectedThreadID, selectedAccount, accounts] in
+        commandState.onForward = { [selectedThreadID] in
             guard let threadId = selectedThreadID else { return }
-            let accountId = selectedAccount?.id ?? accounts.first?.id ?? ""
-            composerMode = .forward(email: ComposerEmailContext(
-                emailId: threadId, accountId: accountId, threadId: threadId,
-                messageId: "", fromAddress: "", subject: ""
-            ))
+            openComposer(.forward, forThreadId: threadId)
         }
 
         commandState.onArchive = {
@@ -643,6 +619,51 @@ public struct MacOSMainView: View {
         commandState.onSync = {
             syncTask?.cancel()
             syncTask = Task { await performManualSync() }
+        }
+    }
+
+    private enum ComposerAction {
+        case new
+        case reply
+        case replyAll
+        case forward
+    }
+
+    private func openComposer(_ action: ComposerAction, forThreadId threadId: String?) {
+        switch action {
+        case .new:
+            guard let accountId = selectedAccount?.id ?? accounts.first?.id else {
+                errorMessage = "Select an account before composing."
+                return
+            }
+            composerMode = .new(accountId: accountId)
+        case .reply, .replyAll, .forward:
+            guard let threadId, let context = composerContext(forThreadId: threadId) else {
+                errorMessage = "Unable to open composer for this conversation."
+                return
+            }
+            switch action {
+            case .reply: composerMode = .reply(email: context)
+            case .replyAll: composerMode = .replyAll(email: context)
+            case .forward: composerMode = .forward(email: context)
+            case .new: break
+            }
+        }
+    }
+
+    private func composerContext(forThreadId threadId: String) -> ComposerEmailContext? {
+        guard let thread = displayThreads.first(where: { $0.id == threadId }) ?? threads.first(where: { $0.id == threadId }) else {
+            return nil
+        }
+        guard let email = latestEmail(in: thread) else { return nil }
+        return ComposerEmailContext(from: email)
+    }
+
+    private func latestEmail(in thread: VaultMailFeature.Thread) -> Email? {
+        thread.emails.max {
+            let lhsDate = $0.dateSent ?? $0.dateReceived ?? .distantPast
+            let rhsDate = $1.dateSent ?? $1.dateReceived ?? .distantPast
+            return lhsDate < rhsDate
         }
     }
 

@@ -139,6 +139,8 @@ struct ProviderSelectionView: View {
     // MARK: - Quick Add Buttons
 
     private var quickAddButtons: some View {
+        // Brand colors are intentionally fixed here so provider quick-add
+        // buttons remain recognizable regardless of the active app theme.
         VStack(spacing: theme.spacing.listRowSpacing) {
             quickAddButton(
                 label: "Sign in with Google",
@@ -302,4 +304,3 @@ struct ProviderSelectionView: View {
         }
     }
 }
-

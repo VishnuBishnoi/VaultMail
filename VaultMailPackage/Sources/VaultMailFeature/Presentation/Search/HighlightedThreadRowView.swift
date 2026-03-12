@@ -76,7 +76,7 @@ struct HighlightedThreadRowView: View {
 
             contentStack
         }
-        .padding(.vertical, theme.spacing.chipVertical)
+        .padding(.vertical, theme.spacing.listRowVertical)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityDescription)
     }

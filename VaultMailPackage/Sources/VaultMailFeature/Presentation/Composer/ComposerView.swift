@@ -131,27 +131,27 @@ public struct ComposerView: View {
     }
 
     private var composeBackgroundStart: Color {
-        colorScheme == .dark ? Color(red: 0.10, green: 0.10, blue: 0.11) : Color(red: 0.95, green: 0.96, blue: 0.98)
+        theme.colors.background
     }
 
     private var composeBackgroundEnd: Color {
-        colorScheme == .dark ? Color(red: 0.13, green: 0.13, blue: 0.14) : Color(red: 0.90, green: 0.93, blue: 0.97)
+        theme.colors.surface
     }
 
     private var composeCard: Color {
-        colorScheme == .dark ? Color(red: 0.14, green: 0.14, blue: 0.15) : Color.white.opacity(0.94)
+        theme.colors.surface
     }
 
     private var composeField: Color {
-        colorScheme == .dark ? Color(red: 0.18, green: 0.18, blue: 0.19) : Color(red: 0.95, green: 0.95, blue: 0.97)
+        theme.colors.surfaceElevated
     }
 
     private var composePrimaryText: Color {
-        colorScheme == .dark ? .white : .black
+        theme.colors.textPrimary
     }
 
     private var composeSecondaryText: Color {
-        colorScheme == .dark ? Color.white.opacity(0.64) : Color.black.opacity(0.56)
+        theme.colors.textSecondary
     }
 
     // MARK: - Body
