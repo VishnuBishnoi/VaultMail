@@ -410,6 +410,20 @@ struct MIMEDecoderExistingTests {
         #expect(result == "Hello World")
     }
 
+    @Test("Decodes quoted-printable body with CR-only soft break")
+    func decodesQPBodyCRSoftBreak() {
+        let input = "unsubscribe=\rhere"
+        let result = MIMEDecoder.decodeBody(input, encoding: "QUOTED-PRINTABLE", charset: "UTF-8")
+        #expect(result == "unsubscribehere")
+    }
+
+    @Test("Decodes quoted-printable body with dangling terminal equals")
+    func decodesQPBodyDanglingTerminalEquals() {
+        let input = "Click here to unsubscribe="
+        let result = MIMEDecoder.decodeBody(input, encoding: "QUOTED-PRINTABLE", charset: "UTF-8")
+        #expect(result == "Click here to unsubscribe")
+    }
+
     @Test("Passes through 7BIT content unchanged")
     func passes7BITThrough() {
         let input = "Hello World"

@@ -10,8 +10,15 @@ struct SettingsStoreTests {
     private static func makeStore() -> (SettingsStore, UserDefaults) {
         let suiteName = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        let store = SettingsStore(defaults: defaults)
+        let store = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         return (store, defaults)
+    }
+
+    @MainActor
+    private static func makeSeparateDefaults() -> (local: UserDefaults, shared: UserDefaults) {
+        let local = UserDefaults(suiteName: "test.local.\(UUID().uuidString)")!
+        let shared = UserDefaults(suiteName: "test.shared.\(UUID().uuidString)")!
+        return (local, shared)
     }
 
     // MARK: - Defaults
@@ -83,10 +90,10 @@ struct SettingsStoreTests {
         let suiteName = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
 
-        let store1 = SettingsStore(defaults: defaults)
+        let store1 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         store1.theme = .dark
 
-        let store2 = SettingsStore(defaults: defaults)
+        let store2 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         #expect(store2.theme == .dark)
     }
 
@@ -96,10 +103,10 @@ struct SettingsStoreTests {
         let suiteName = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
 
-        let store1 = SettingsStore(defaults: defaults)
+        let store1 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         store1.undoSendDelay = .thirtySeconds
 
-        let store2 = SettingsStore(defaults: defaults)
+        let store2 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         #expect(store2.undoSendDelay == .thirtySeconds)
     }
 
@@ -109,10 +116,10 @@ struct SettingsStoreTests {
         let suiteName = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
 
-        let store1 = SettingsStore(defaults: defaults)
+        let store1 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         store1.appLockEnabled = true
 
-        let store2 = SettingsStore(defaults: defaults)
+        let store2 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         #expect(store2.appLockEnabled == true)
     }
 
@@ -122,10 +129,10 @@ struct SettingsStoreTests {
         let suiteName = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
 
-        let store1 = SettingsStore(defaults: defaults)
+        let store1 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         store1.isOnboardingComplete = true
 
-        let store2 = SettingsStore(defaults: defaults)
+        let store2 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         #expect(store2.isOnboardingComplete == true)
     }
 
@@ -135,10 +142,10 @@ struct SettingsStoreTests {
         let suiteName = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
 
-        let store1 = SettingsStore(defaults: defaults)
+        let store1 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         store1.categoryTabVisibility[AICategory.social.rawValue] = false
 
-        let store2 = SettingsStore(defaults: defaults)
+        let store2 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         #expect(store2.categoryTabVisibility[AICategory.social.rawValue] == false)
         #expect(store2.categoryTabVisibility[AICategory.primary.rawValue] == true)
     }
@@ -149,10 +156,10 @@ struct SettingsStoreTests {
         let suiteName = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
 
-        let store1 = SettingsStore(defaults: defaults)
+        let store1 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         store1.notificationPreferences["acc-1"] = false
 
-        let store2 = SettingsStore(defaults: defaults)
+        let store2 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         #expect(store2.notificationPreferences["acc-1"] == false)
     }
 
@@ -162,10 +169,10 @@ struct SettingsStoreTests {
         let suiteName = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
 
-        let store1 = SettingsStore(defaults: defaults)
+        let store1 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         store1.setCacheLimit(250, for: "acc-1")
 
-        let store2 = SettingsStore(defaults: defaults)
+        let store2 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         #expect(store2.cacheLimit(for: "acc-1") == 250)
     }
 
@@ -175,10 +182,10 @@ struct SettingsStoreTests {
         let suiteName = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
 
-        let store1 = SettingsStore(defaults: defaults)
+        let store1 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         store1.defaultSendingAccountId = "acc-123"
 
-        let store2 = SettingsStore(defaults: defaults)
+        let store2 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         #expect(store2.defaultSendingAccountId == "acc-123")
     }
 
@@ -188,10 +195,10 @@ struct SettingsStoreTests {
         let suiteName = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
 
-        let store1 = SettingsStore(defaults: defaults)
+        let store1 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         store1.blockRemoteImages = true
 
-        let store2 = SettingsStore(defaults: defaults)
+        let store2 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         #expect(store2.blockRemoteImages == true)
     }
 
@@ -201,10 +208,10 @@ struct SettingsStoreTests {
         let suiteName = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
 
-        let store1 = SettingsStore(defaults: defaults)
+        let store1 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         store1.blockTrackingPixels = true
 
-        let store2 = SettingsStore(defaults: defaults)
+        let store2 = SettingsStore(defaults: defaults, sharedDefaults: defaults)
         #expect(store2.blockTrackingPixels == true)
     }
 
@@ -222,6 +229,69 @@ struct SettingsStoreTests {
     func notificationsEnabledDefault() {
         let (store, _) = Self.makeStore()
         #expect(store.notificationsEnabled(for: "unknown") == true)
+    }
+
+    @Test("background alerts default to enabled")
+    @MainActor
+    func backgroundAlertsDefaultEnabled() {
+        let (store, _) = Self.makeStore()
+        #expect(store.backgroundAlertsEnabled == true)
+        #expect(store.macLoginItemHelperEnabled == false)
+    }
+
+    @Test("Mirrored notification and background settings are written to shared defaults")
+    @MainActor
+    func sharedMirroringWrites() {
+        let (local, shared) = Self.makeSeparateDefaults()
+        let store = SettingsStore(defaults: local, sharedDefaults: shared)
+
+        store.backgroundAlertsEnabled = false
+        store.macLoginItemHelperEnabled = true
+        store.notificationPreferences = ["acc-1": false]
+        store.notificationCategoryPreferences = [AICategory.promotions.rawValue: false]
+        store.vipContacts = ["vip@example.com"]
+        store.mutedThreadIds = ["thread-1"]
+        store.quietHoursEnabled = true
+        store.quietHoursStart = 60
+        store.quietHoursEnd = 120
+
+        #expect(shared.object(forKey: "backgroundAlertsEnabled") as? Bool == false)
+        #expect(shared.object(forKey: "macLoginItemHelperEnabled") as? Bool == true)
+        #expect((shared.testJSON(forKey: "notificationPreferences") as [String: Bool]?)?["acc-1"] == false)
+        #expect(
+            (shared.testJSON(forKey: "notifCategoryPreferences") as [String: Bool]?)?[AICategory.promotions.rawValue] == false
+        )
+        #expect((shared.testJSON(forKey: "vipContacts") as [String]?)?.contains("vip@example.com") == true)
+        #expect((shared.testJSON(forKey: "mutedThreadIds") as [String]?)?.contains("thread-1") == true)
+        #expect(shared.object(forKey: "quietHoursEnabled") as? Bool == true)
+        #expect(shared.object(forKey: "quietHoursStart") as? Int == 60)
+        #expect(shared.object(forKey: "quietHoursEnd") as? Int == 120)
+    }
+
+    @Test("Store reads mirrored values from shared defaults when local defaults are empty")
+    @MainActor
+    func sharedFallbackReads() {
+        let (local, shared) = Self.makeSeparateDefaults()
+        shared.set(false, forKey: "backgroundAlertsEnabled")
+        shared.set(true, forKey: "macLoginItemHelperEnabled")
+        shared.set(true, forKey: "quietHoursEnabled")
+        shared.set(180, forKey: "quietHoursStart")
+        shared.set(300, forKey: "quietHoursEnd")
+        shared.setTestJSON(["acc-shared": false], forKey: "notificationPreferences")
+        shared.setTestJSON([AICategory.social.rawValue: false], forKey: "notifCategoryPreferences")
+        shared.setTestJSON(["vip@shared.com"], forKey: "vipContacts")
+        shared.setTestJSON(["thread-shared"], forKey: "mutedThreadIds")
+
+        let store = SettingsStore(defaults: local, sharedDefaults: shared)
+        #expect(store.backgroundAlertsEnabled == false)
+        #expect(store.macLoginItemHelperEnabled == true)
+        #expect(store.quietHoursEnabled == true)
+        #expect(store.quietHoursStart == 180)
+        #expect(store.quietHoursEnd == 300)
+        #expect(store.notificationPreferences["acc-shared"] == false)
+        #expect(store.notificationCategoryPreferences[AICategory.social.rawValue] == false)
+        #expect(store.vipContacts.contains("vip@shared.com"))
+        #expect(store.mutedThreadIds.contains("thread-shared"))
     }
 
     @Test("colorScheme returns correct values")
@@ -256,6 +326,10 @@ struct SettingsStoreTests {
         store.defaultSendingAccountId = "acc-1"
         store.notificationPreferences["acc-1"] = false
         store.attachmentCacheLimits["acc-1"] = 100
+        store.backgroundAlertsEnabled = false
+        store.macLoginItemHelperEnabled = true
+        store.lastBackgroundCheckAt = Date()
+        store.lastBackgroundAlertAt = Date()
 
         // Reset
         store.resetAll()
@@ -269,5 +343,22 @@ struct SettingsStoreTests {
         #expect(store.defaultSendingAccountId == nil)
         #expect(store.notificationPreferences.isEmpty)
         #expect(store.attachmentCacheLimits.isEmpty)
+        #expect(store.backgroundAlertsEnabled == true)
+        #expect(store.macLoginItemHelperEnabled == false)
+        #expect(store.lastBackgroundCheckAt == nil)
+        #expect(store.lastBackgroundAlertAt == nil)
+    }
+}
+
+private extension UserDefaults {
+    func setTestJSON<T: Encodable>(_ value: T, forKey key: String) {
+        if let data = try? JSONEncoder().encode(value) {
+            set(data, forKey: key)
+        }
+    }
+
+    func testJSON<T: Decodable>(forKey key: String) -> T? {
+        guard let data = data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
     }
 }

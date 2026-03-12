@@ -8,12 +8,17 @@ import SwiftUI
 /// Spec ref: NOTIF-09, NOTIF-10, NOTIF-11, NOTIF-14, NOTIF-23
 public struct NotificationSettingsContent: View {
     @Environment(SettingsStore.self) private var settings
+    @Environment(ThemeProvider.self) private var theme
     @Environment(NotificationSyncCoordinator.self) private var coordinator: NotificationSyncCoordinator?
 
     let accounts: [Account]
 
     @State private var authStatus: NotificationAuthStatus = .notDetermined
     @State private var newVIPEmail = ""
+    #if os(macOS)
+    @State private var helperStatusText = "Unavailable"
+    @State private var helperErrorText: String?
+    #endif
     #if DEBUG
     @State private var debugStatus: String?
     #endif
@@ -25,11 +30,15 @@ public struct NotificationSettingsContent: View {
     public var body: some View {
         Form {
             systemPermissionSection
+            backgroundDeliverySection
             accountsSection
             categoriesSection
             vipContactsSection
             mutedThreadsSection
             quietHoursSection
+            #if os(macOS)
+            helperSection
+            #endif
             #if DEBUG
             debugSection
             #endif
@@ -39,6 +48,42 @@ public struct NotificationSettingsContent: View {
         #endif
         .task {
             await checkAuthStatus()
+            #if os(macOS)
+            helperStatusText = MacLoginItemManager().statusDescription
+            #endif
+        }
+    }
+
+    // MARK: - Background Delivery Section
+
+    @ViewBuilder
+    private var backgroundDeliverySection: some View {
+        @Bindable var settings = settings
+        Section {
+            Toggle("Background Alerts (Best Effort)", isOn: $settings.backgroundAlertsEnabled)
+                .tint(theme.colors.accent)
+                .accessibilityLabel("Background alerts best effort")
+
+            if let lastCheck = settings.lastBackgroundCheckAt {
+                HStack {
+                    Text("Last Background Check")
+                    Spacer()
+                    Text(lastCheck.formatted(date: .abbreviated, time: .shortened))
+                        .foregroundStyle(theme.colors.textSecondary)
+                }
+            }
+            if let lastAlert = settings.lastBackgroundAlertAt {
+                HStack {
+                    Text("Last Background Alert")
+                    Spacer()
+                    Text(lastAlert.formatted(date: .abbreviated, time: .shortened))
+                        .foregroundStyle(theme.colors.textSecondary)
+                }
+            }
+        } header: {
+            Text("Background Delivery")
+        } footer: {
+            Text("Best effort only. Background checks may be delayed by the system.")
         }
     }
 
@@ -63,7 +108,7 @@ public struct NotificationSettingsContent: View {
                             UIApplication.shared.open(url)
                         }
                     }
-                    .font(.callout)
+                    .font(theme.typography.bodyMedium)
                 }
                 #endif
             }
@@ -90,9 +135,9 @@ public struct NotificationSettingsContent: View {
 
     private var authStatusColor: Color {
         switch authStatus {
-        case .authorized, .provisional: .green
-        case .denied: .orange
-        case .notDetermined: .secondary
+        case .authorized, .provisional: theme.colors.success
+        case .denied: theme.colors.warning
+        case .notDetermined: theme.colors.textSecondary
         }
     }
 
@@ -103,13 +148,20 @@ public struct NotificationSettingsContent: View {
         Section("Accounts") {
             if accounts.isEmpty {
                 Text("No accounts configured.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.colors.textSecondary)
             } else {
                 ForEach(accounts, id: \.id) { account in
-                    Toggle(account.email, isOn: Binding(
+                    let accountToggleBinding = Binding(
                         get: { settings.notificationsEnabled(for: account.id) },
                         set: { settings.notificationPreferences[account.id] = $0 }
-                    ))
+                    )
+                    Toggle(isOn: accountToggleBinding) {
+                        Text(account.email)
+                            .foregroundStyle(
+                                accountToggleBinding.wrappedValue ? theme.colors.textPrimary : theme.colors.textSecondary
+                            )
+                    }
+                    .tint(theme.colors.accent)
                     .accessibilityLabel("Notifications for \(account.email)")
                 }
             }
@@ -122,10 +174,17 @@ public struct NotificationSettingsContent: View {
     private var categoriesSection: some View {
         Section {
             ForEach(toggleableCategories, id: \.0) { key, label in
-                Toggle(label, isOn: Binding(
+                let categoryToggleBinding = Binding(
                     get: { settings.notificationCategoryEnabled(for: key) },
                     set: { settings.notificationCategoryPreferences[key] = $0 }
-                ))
+                )
+                Toggle(isOn: categoryToggleBinding) {
+                    Text(label)
+                        .foregroundStyle(
+                            categoryToggleBinding.wrappedValue ? theme.colors.textPrimary : theme.colors.textSecondary
+                        )
+                }
+                .tint(theme.colors.accent)
                 .accessibilityLabel("Notifications for \(label) category")
             }
         } header: {
@@ -152,7 +211,7 @@ public struct NotificationSettingsContent: View {
             ForEach(Array(settings.vipContacts).sorted(), id: \.self) { email in
                 HStack {
                     Image(systemName: "star.fill")
-                        .foregroundStyle(.yellow)
+                        .foregroundStyle(theme.colors.starred)
                         .accessibilityHidden(true)
                     Text(email)
                 }
@@ -195,16 +254,16 @@ public struct NotificationSettingsContent: View {
         Section {
             if settings.mutedThreadIds.isEmpty {
                 Text("No muted threads.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.colors.textSecondary)
             } else {
                 ForEach(Array(settings.mutedThreadIds).sorted(), id: \.self) { threadId in
                     HStack {
                         Image(systemName: "bell.slash")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.colors.textSecondary)
                             .accessibilityHidden(true)
                         Text(threadId)
                             .lineLimit(1)
-                            .font(.caption.monospaced())
+                            .font(theme.typography.captionMono)
                     }
                     .swipeActions(edge: .trailing) {
                         Button("Unmute") {
@@ -228,6 +287,7 @@ public struct NotificationSettingsContent: View {
         @Bindable var settings = settings
         Section {
             Toggle("Enable Quiet Hours", isOn: $settings.quietHoursEnabled)
+                .tint(theme.colors.accent)
                 .accessibilityLabel("Quiet hours")
 
             if settings.quietHoursEnabled {
@@ -257,6 +317,51 @@ public struct NotificationSettingsContent: View {
             Text("Notifications are silenced during quiet hours. VIP contacts override this setting.")
         }
     }
+
+    #if os(macOS)
+    // MARK: - macOS Helper Section
+
+    @ViewBuilder
+    private var helperSection: some View {
+        @Bindable var settings = settings
+        Section {
+            Toggle("Enable Fully-Quit Alerts", isOn: Binding(
+                get: { settings.macLoginItemHelperEnabled },
+                set: { newValue in
+                    let manager = MacLoginItemManager()
+                    do {
+                        try manager.setEnabled(newValue)
+                        settings.macLoginItemHelperEnabled = newValue
+                        helperStatusText = manager.statusDescription
+                        helperErrorText = nil
+                    } catch {
+                        settings.macLoginItemHelperEnabled = false
+                        helperStatusText = manager.statusDescription
+                        helperErrorText = "Could not update helper status."
+                    }
+                }
+            ))
+            .disabled(!AppConstants.macLoginItemHelperFeatureEnabled)
+            .tint(theme.colors.accent)
+
+            HStack {
+                Text("Helper Status")
+                Spacer()
+                Text(helperStatusText)
+                    .foregroundStyle(theme.colors.textSecondary)
+            }
+
+            if let helperErrorText {
+                Text(helperErrorText)
+                    .foregroundStyle(theme.colors.warning)
+            }
+        } header: {
+            Text("Login Item Helper")
+        } footer: {
+            Text("When enabled, a login item can check for mail and notify even after the app is quit.")
+        }
+    }
+    #endif
 
     // MARK: - Debug Section
 
@@ -296,8 +401,8 @@ public struct NotificationSettingsContent: View {
 
             if let debugStatus {
                 Text(debugStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.textSecondary)
             }
         } header: {
             Text("Debug")

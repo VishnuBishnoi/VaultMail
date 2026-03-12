@@ -67,6 +67,7 @@ fastlane/test_output
 
 # Signing keys (NEVER commit)
 .signing/
+Config/Local.xcconfig
 
 # Build export artifacts
 ExportOptions.plist

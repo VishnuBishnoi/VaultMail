@@ -37,6 +37,7 @@ struct VaultMailApp: App {
                 mainView(deps: deps)
             } else {
                 DatabaseErrorView(message: containerError ?? "Unknown error")
+                    .environment(ThemeProvider())
             }
         }
         #if os(macOS)
@@ -58,6 +59,7 @@ struct VaultMailApp: App {
                     connectionTestUseCase: deps.connectionTestUseCase
                 )
                 .environment(deps.settingsStore)
+                .environment(deps.themeProvider)
                 .environment(deps.notificationCoordinator)
                 .modelContainer(deps.modelContainer)
             }
@@ -89,7 +91,9 @@ struct VaultMailApp: App {
             connectionTestUseCase: deps.connectionTestUseCase
         )
         .environment(deps.settingsStore)
+        .environment(deps.themeProvider)
         .environment(deps.notificationCoordinator)
+        .environment(deps.backgroundSyncScheduler)
         .modelContainer(deps.modelContainer)
         .task {
             await deps.searchIndexManager.openIndex()
@@ -118,7 +122,9 @@ struct VaultMailApp: App {
             connectionTestUseCase: deps.connectionTestUseCase
         )
         .environment(deps.settingsStore)
+        .environment(deps.themeProvider)
         .environment(deps.notificationCoordinator)
+        .environment(deps.backgroundSyncScheduler)
         .modelContainer(deps.modelContainer)
         .task {
             await deps.searchIndexManager.openIndex()
@@ -136,6 +142,7 @@ struct VaultMailApp: App {
 private struct AppDependencies {
     let modelContainer: ModelContainer
     let settingsStore: SettingsStore
+    let themeProvider: ThemeProvider
     let appLockManager: AppLockManager
     let manageAccounts: ManageAccountsUseCaseProtocol
     let fetchThreads: FetchThreadsUseCaseProtocol
@@ -167,9 +174,11 @@ private struct AppDependencies {
         self.modelContainer = modelContainer
 
         settingsStore = SettingsStore()
+        themeProvider = ThemeProvider(themeId: settingsStore.selectedThemeId)
+        themeProvider.fontScale = settingsStore.fontSize.scale
         appLockManager = AppLockManager()
 
-        let keychainManager = KeychainManager()
+        let keychainManager = KeychainManager(accessGroup: KeychainManager.entitlementAccessGroup())
         let oauthManager = OAuthManager(clientId: AppConstants.oauthClientId)
         let accountRepo = AccountRepositoryImpl(
             modelContainer: modelContainer,
@@ -308,6 +317,7 @@ private struct AppDependencies {
         backgroundSyncScheduler = BackgroundSyncScheduler(
             syncEmails: syncEmails,
             manageAccounts: manageAccounts,
+            settingsStore: settingsStore,
             notificationCoordinator: notificationCoordinator
         )
         backgroundSyncScheduler.registerTasks()

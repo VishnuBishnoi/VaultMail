@@ -1,0 +1,15 @@
+// Local.xcconfig.example
+// Copy to Config/Local.xcconfig and customize for your machine.
+// This file is intended for local signing overrides and must not be committed.
+
+// Your Apple Developer Team ID
+VAULTMAIL_DEVELOPMENT_TEAM = YOUR_TEAM_ID
+
+// Use a unique local bundle namespace for provisioning/profile generation
+VAULTMAIL_BUNDLE_IDENTIFIER = com.yourname.vaultmail
+VAULTMAIL_TEST_BUNDLE_IDENTIFIER = com.yourname.vaultmail.tests
+VAULTMAIL_HELPER_BUNDLE_IDENTIFIER = com.yourname.vaultmail.MailBackgroundHelper
+
+// Keep app groups/keychain suffix aligned with your local namespace
+VAULTMAIL_APP_GROUP_IDENTIFIER = group.com.yourname.vaultmail
+VAULTMAIL_KEYCHAIN_GROUP_SUFFIX = com.yourname.vaultmail.shared

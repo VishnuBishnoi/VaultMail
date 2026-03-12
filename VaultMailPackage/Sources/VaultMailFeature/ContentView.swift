@@ -22,8 +22,11 @@ import SwiftData
 /// Spec ref: FR-OB-01, FR-SET-01
 public struct ContentView: View {
     @Environment(SettingsStore.self) private var settings
+    @Environment(ThemeProvider.self) private var theme
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(BackgroundSyncScheduler.self) private var backgroundSyncScheduler
 
     let manageAccounts: ManageAccountsUseCaseProtocol
     let fetchThreads: FetchThreadsUseCaseProtocol
@@ -130,7 +133,32 @@ public struct ContentView: View {
         .onChange(of: settings.isOnboardingComplete) {
             Task { await loadAccounts() }
         }
+        .onChange(of: settings.backgroundAlertsEnabled) { _, enabled in
+            #if os(iOS)
+            if enabled {
+                backgroundSyncScheduler.scheduleNextSync()
+            } else {
+                backgroundSyncScheduler.cancelScheduledSync()
+            }
+            #endif
+        }
         .onChange(of: scenePhase) { oldPhase, newPhase in
+            #if os(iOS)
+            if newPhase == .background {
+                if settings.backgroundAlertsEnabled {
+                    backgroundSyncScheduler.scheduleNextSync()
+                } else {
+                    backgroundSyncScheduler.cancelScheduledSync()
+                }
+            }
+            #endif
+
+            #if os(macOS)
+            if newPhase == .active {
+                settings.mainAppHeartbeatAt = Date()
+            }
+            #endif
+
             if settings.appLockEnabled && oldPhase == .background && newPhase == .active {
                 appLockManager.lock()
                 Task { await authenticateAppLock() }
@@ -141,6 +169,20 @@ public struct ContentView: View {
             } else if oldPhase == .background && newPhase == .active {
                 undoSendManager.resume()
             }
+        }
+        .onAppear {
+            theme.fontScale = settings.fontSize.scale
+        }
+        .onChange(of: settings.fontSize) { _, newValue in
+            theme.fontScale = newValue.scale
+        }
+        .tint(theme.colors.accent)
+        .dynamicTypeSize(settings.fontSize.dynamicTypeSize)
+        .onAppear {
+            theme.colorScheme = colorScheme
+        }
+        .onChange(of: colorScheme) { _, newValue in
+            theme.colorScheme = newValue
         }
     }
 

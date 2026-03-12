@@ -16,6 +16,28 @@ struct BackgroundSyncSchedulerTests {
         var shouldThrow = false
 
         @discardableResult
+        func syncAccount(accountId: String, options: SyncAccountOptions) async throws -> SyncResult {
+            let emails = try await syncAccount(accountId: accountId)
+            return SyncResult(
+                newEmails: emails,
+                accountOptions: options
+            )
+        }
+
+        @discardableResult
+        func syncFolder(
+            accountId: String,
+            folderId: String,
+            options: SyncFolderOptions
+        ) async throws -> SyncResult {
+            let emails = try await syncFolder(accountId: accountId, folderId: folderId)
+            return SyncResult(
+                newEmails: emails,
+                folderOptions: options
+            )
+        }
+
+        @discardableResult
         func syncAccount(accountId: String) async throws -> [Email] {
             syncAccountCallCount += 1
             lastSyncedAccountId = accountId
@@ -90,7 +112,7 @@ struct BackgroundSyncSchedulerTests {
 
     @Test("Task identifier matches Info.plist value")
     func taskIdentifier() {
-        #expect(BackgroundSyncScheduler.taskIdentifier == "com.vaultmail.app.sync")
+        #expect(BackgroundSyncScheduler.taskIdentifier == "\(Bundle.main.bundleIdentifier ?? "com.vaultmail.app").sync")
     }
 
     @Test("Scheduler initializes with provided dependencies")
@@ -100,7 +122,8 @@ struct BackgroundSyncSchedulerTests {
 
         let scheduler = BackgroundSyncScheduler(
             syncEmails: syncEmails,
-            manageAccounts: manageAccounts
+            manageAccounts: manageAccounts,
+            settingsStore: SettingsStore(defaults: UserDefaults(suiteName: "test.bg.init.\(UUID().uuidString)")!)
         )
 
         // Scheduler should be created without errors
@@ -114,7 +137,8 @@ struct BackgroundSyncSchedulerTests {
 
         let scheduler = BackgroundSyncScheduler(
             syncEmails: syncEmails,
-            manageAccounts: manageAccounts
+            manageAccounts: manageAccounts,
+            settingsStore: SettingsStore(defaults: UserDefaults(suiteName: "test.bg.register.\(UUID().uuidString)")!)
         )
 
         // On macOS this is a no-op, on iOS it registers with BGTaskScheduler.
@@ -129,7 +153,8 @@ struct BackgroundSyncSchedulerTests {
 
         let scheduler = BackgroundSyncScheduler(
             syncEmails: syncEmails,
-            manageAccounts: manageAccounts
+            manageAccounts: manageAccounts,
+            settingsStore: SettingsStore(defaults: UserDefaults(suiteName: "test.bg.schedule.\(UUID().uuidString)")!)
         )
 
         // On macOS this is a no-op, on iOS it submits a BGAppRefreshTaskRequest.

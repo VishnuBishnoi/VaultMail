@@ -35,7 +35,15 @@ public actor LlamaEngine: AIEngineProtocol {
         /// Default configuration suitable for email tasks on mobile devices.
         public static let `default` = Configuration(
             contextSize: 2048,
-            gpuLayers: -1,  // Offload all layers to Metal/GPU
+            // macOS: keep CPU-only by default to avoid known Metal backend
+            // teardown aborts on app termination in some llama builds.
+            gpuLayers: {
+                #if os(macOS)
+                return 0
+                #else
+                return -1
+                #endif
+            }(),
             threadCount: 4,
             temperature: 0.7,
             topK: 40,

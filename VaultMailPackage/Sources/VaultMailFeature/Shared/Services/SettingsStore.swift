@@ -16,6 +16,7 @@ import SwiftUI
 public final class SettingsStore {
 
     private let defaults: UserDefaults
+    private let sharedDefaults: UserDefaults?
 
     // MARK: - Appearance
 
@@ -23,6 +24,18 @@ public final class SettingsStore {
     /// Spec ref: FR-SET-01 Appearance section
     public var theme: AppTheme {
         didSet { defaults.set(theme.rawValue, forKey: Keys.theme) }
+    }
+
+    /// Selected accent theme ID (e.g., "default", "midnight", "forest").
+    /// Orthogonal to `theme` — `theme` controls color scheme, this controls accent palette.
+    /// Spec ref: UI Theming spec FR-TH-05
+    public var selectedThemeId: String {
+        didSet { defaults.set(selectedThemeId, forKey: Keys.selectedThemeId) }
+    }
+
+    /// Global app font size preference.
+    public var fontSize: AppFontSize {
+        didSet { defaults.set(fontSize.rawValue, forKey: Keys.fontSize) }
     }
 
     /// Computed color scheme for SwiftUI's preferredColorScheme modifier.
@@ -82,44 +95,71 @@ public final class SettingsStore {
     /// Per-account notification preferences. Keyed by account ID. Default: true for new accounts.
     /// Spec ref: FR-SET-01 Notifications section
     public var notificationPreferences: [String: Bool] {
-        didSet { defaults.setJSON(notificationPreferences, forKey: Keys.notificationPreferences) }
+        didSet { setMirroredJSON(notificationPreferences, forKey: Keys.notificationPreferences) }
     }
 
     /// Per-category notification preferences. Keyed by AICategory rawValue.
     /// Default: empty dictionary (all categories enabled when key absent).
     /// Spec ref: NOTIF-09, NOTIF-23
     public var notificationCategoryPreferences: [String: Bool] {
-        didSet { defaults.setJSON(notificationCategoryPreferences, forKey: Keys.notificationCategoryPreferences) }
+        didSet { setMirroredJSON(notificationCategoryPreferences, forKey: Keys.notificationCategoryPreferences) }
     }
 
     /// VIP contact email addresses (lowercased). VIP contacts always trigger notifications.
     /// Spec ref: NOTIF-10, NOTIF-23
     public var vipContacts: Set<String> {
-        didSet { defaults.setJSON(Array(vipContacts), forKey: Keys.vipContacts) }
+        didSet { setMirroredJSON(Array(vipContacts), forKey: Keys.vipContacts) }
     }
 
     /// Muted thread IDs. Muted threads never trigger notifications.
     /// Spec ref: NOTIF-11, NOTIF-23
     public var mutedThreadIds: Set<String> {
-        didSet { defaults.setJSON(Array(mutedThreadIds), forKey: Keys.mutedThreadIds) }
+        didSet { setMirroredJSON(Array(mutedThreadIds), forKey: Keys.mutedThreadIds) }
     }
 
     /// Whether quiet hours are enabled. Default: false.
     /// Spec ref: NOTIF-14, NOTIF-23
     public var quietHoursEnabled: Bool {
-        didSet { defaults.set(quietHoursEnabled, forKey: Keys.quietHoursEnabled) }
+        didSet { setMirrored(quietHoursEnabled, forKey: Keys.quietHoursEnabled) }
     }
 
     /// Quiet hours start time in minutes since midnight (e.g., 1320 = 22:00). Default: 1320.
     /// Spec ref: NOTIF-14, NOTIF-23
     public var quietHoursStart: Int {
-        didSet { defaults.set(quietHoursStart, forKey: Keys.quietHoursStart) }
+        didSet { setMirrored(quietHoursStart, forKey: Keys.quietHoursStart) }
     }
 
     /// Quiet hours end time in minutes since midnight (e.g., 420 = 07:00). Default: 420.
     /// Spec ref: NOTIF-14, NOTIF-23
     public var quietHoursEnd: Int {
-        didSet { defaults.set(quietHoursEnd, forKey: Keys.quietHoursEnd) }
+        didSet { setMirrored(quietHoursEnd, forKey: Keys.quietHoursEnd) }
+    }
+
+    /// Global background-alert switch used by iOS background refresh and macOS helper.
+    /// Default: true.
+    public var backgroundAlertsEnabled: Bool {
+        didSet { setMirrored(backgroundAlertsEnabled, forKey: Keys.backgroundAlertsEnabled) }
+    }
+
+    /// macOS login-item helper enablement (feature-flagged rollout).
+    /// Default: false.
+    public var macLoginItemHelperEnabled: Bool {
+        didSet { setMirrored(macLoginItemHelperEnabled, forKey: Keys.macLoginItemHelperEnabled) }
+    }
+
+    /// Timestamp of the last completed background mail check.
+    public var lastBackgroundCheckAt: Date? {
+        didSet { setMirrored(lastBackgroundCheckAt, forKey: Keys.lastBackgroundCheckAt) }
+    }
+
+    /// Timestamp of the last background cycle that actually delivered notifications.
+    public var lastBackgroundAlertAt: Date? {
+        didSet { setMirrored(lastBackgroundAlertAt, forKey: Keys.lastBackgroundAlertAt) }
+    }
+
+    /// Main app heartbeat timestamp used by helper arbitration on macOS.
+    public var mainAppHeartbeatAt: Date? {
+        didSet { setMirrored(mainAppHeartbeatAt, forKey: Keys.mainAppHeartbeatAt) }
     }
 
     // MARK: - Data Management
@@ -144,8 +184,17 @@ public final class SettingsStore {
 
     /// Creates a SettingsStore reading from the given UserDefaults.
     /// - Parameter defaults: UserDefaults instance. Use `UserDefaults(suiteName:)` for tests.
-    public init(defaults: UserDefaults = .standard) {
+    /// - Parameter sharedDefaults: Optional shared defaults (App Group). Provide in tests for isolation.
+    public init(defaults: UserDefaults = .standard, sharedDefaults: UserDefaults? = nil) {
         self.defaults = defaults
+        if let sharedDefaults {
+            self.sharedDefaults = sharedDefaults
+        } else if defaults === UserDefaults.standard {
+            self.sharedDefaults = UserDefaults(suiteName: AppConstants.sharedAppGroupIdentifier)
+        } else {
+            self.sharedDefaults = nil
+        }
+        let resolvedSharedDefaults = self.sharedDefaults
 
         // Read initial values from UserDefaults, falling back to spec defaults
         self.theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .system
@@ -158,26 +207,88 @@ public final class SettingsStore {
         self.appLockEnabled = defaults.bool(forKey: Keys.appLockEnabled)
         self.blockRemoteImages = defaults.bool(forKey: Keys.blockRemoteImages)
         self.blockTrackingPixels = defaults.bool(forKey: Keys.blockTrackingPixels)
-        self.notificationPreferences = defaults.json(forKey: Keys.notificationPreferences) ?? [:]
-        self.notificationCategoryPreferences = defaults.json(forKey: Keys.notificationCategoryPreferences) ?? [:]
-        let vipArray: [String] = defaults.json(forKey: Keys.vipContacts) ?? []
+        self.notificationPreferences = Self.jsonValue(
+            forKey: Keys.notificationPreferences,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults
+        ) ?? [:]
+        self.notificationCategoryPreferences = Self.jsonValue(
+            forKey: Keys.notificationCategoryPreferences,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults
+        ) ?? [:]
+        let vipArray: [String] = Self.jsonValue(
+            forKey: Keys.vipContacts,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults
+        ) ?? []
         self.vipContacts = Set(vipArray)
-        let mutedArray: [String] = defaults.json(forKey: Keys.mutedThreadIds) ?? []
+        let mutedArray: [String] = Self.jsonValue(
+            forKey: Keys.mutedThreadIds,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults
+        ) ?? []
         self.mutedThreadIds = Set(mutedArray)
-        self.quietHoursEnabled = defaults.bool(forKey: Keys.quietHoursEnabled)
-        if defaults.object(forKey: Keys.quietHoursStart) != nil {
-            self.quietHoursStart = defaults.integer(forKey: Keys.quietHoursStart)
+        self.quietHoursEnabled = Self.boolValue(
+            forKey: Keys.quietHoursEnabled,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults,
+            default: false
+        ) ?? false
+        if let quietHoursStart = Self.intValue(
+            forKey: Keys.quietHoursStart,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults
+        ) {
+            self.quietHoursStart = quietHoursStart
         } else {
             self.quietHoursStart = 1320 // 22:00
         }
-        if defaults.object(forKey: Keys.quietHoursEnd) != nil {
-            self.quietHoursEnd = defaults.integer(forKey: Keys.quietHoursEnd)
+        if let quietHoursEnd = Self.intValue(
+            forKey: Keys.quietHoursEnd,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults
+        ) {
+            self.quietHoursEnd = quietHoursEnd
         } else {
             self.quietHoursEnd = 420 // 07:00
         }
+        if let backgroundAlertsEnabled = Self.boolValue(
+            forKey: Keys.backgroundAlertsEnabled,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults
+        ) {
+            self.backgroundAlertsEnabled = backgroundAlertsEnabled
+        } else {
+            self.backgroundAlertsEnabled = true
+        }
+        self.macLoginItemHelperEnabled = Self.boolValue(
+            forKey: Keys.macLoginItemHelperEnabled,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults,
+            default: false
+        ) ?? false
+        self.lastBackgroundCheckAt = Self.dateValue(
+            forKey: Keys.lastBackgroundCheckAt,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults
+        )
+        self.lastBackgroundAlertAt = Self.dateValue(
+            forKey: Keys.lastBackgroundAlertAt,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults
+        )
+        self.mainAppHeartbeatAt = Self.dateValue(
+            forKey: Keys.mainAppHeartbeatAt,
+            defaults: defaults,
+            sharedDefaults: resolvedSharedDefaults
+        )
         self.attachmentCacheLimits = defaults.json(forKey: Keys.attachmentCacheLimits) ?? [:]
         self.isOnboardingComplete = defaults.bool(forKey: Keys.isOnboardingComplete)
         self.defaultSendingAccountId = defaults.string(forKey: Keys.defaultSendingAccountId)
+        self.selectedThemeId = defaults.string(forKey: Keys.selectedThemeId) ?? "default"
+        self.fontSize = AppFontSize(rawValue: defaults.string(forKey: Keys.fontSize) ?? "") ?? .medium
+        seedSharedDefaultsIfNeeded()
     }
 
     // MARK: - Helpers
@@ -185,6 +296,89 @@ public final class SettingsStore {
     /// Returns the attachment cache limit for a given account (default 500 MB).
     public func cacheLimit(for accountId: String) -> Int {
         attachmentCacheLimits[accountId] ?? AppConstants.maxAttachmentCacheMB
+    }
+
+    private func setMirrored(_ value: Any?, forKey key: String) {
+        defaults.set(value, forKey: key)
+        sharedDefaults?.set(value, forKey: key)
+    }
+
+    private func setMirroredJSON<T: Encodable>(_ value: T, forKey key: String) {
+        defaults.setJSON(value, forKey: key)
+        sharedDefaults?.setJSON(value, forKey: key)
+    }
+
+    private func seedSharedDefaultsIfNeeded() {
+        guard let sharedDefaults else { return }
+        let mirroredKeys = [
+            Keys.notificationPreferences,
+            Keys.notificationCategoryPreferences,
+            Keys.vipContacts,
+            Keys.mutedThreadIds,
+            Keys.quietHoursEnabled,
+            Keys.quietHoursStart,
+            Keys.quietHoursEnd,
+            Keys.backgroundAlertsEnabled,
+            Keys.macLoginItemHelperEnabled,
+            Keys.lastBackgroundCheckAt,
+            Keys.lastBackgroundAlertAt,
+            Keys.mainAppHeartbeatAt,
+        ]
+
+        for key in mirroredKeys {
+            if sharedDefaults.object(forKey: key) == nil, let value = defaults.object(forKey: key) {
+                sharedDefaults.set(value, forKey: key)
+            }
+        }
+    }
+
+    private static func boolValue(
+        forKey key: String,
+        defaults: UserDefaults,
+        sharedDefaults: UserDefaults?,
+        default defaultValue: Bool? = nil
+    ) -> Bool? {
+        if let value = defaults.object(forKey: key) as? Bool {
+            return value
+        }
+        if let value = sharedDefaults?.object(forKey: key) as? Bool {
+            return value
+        }
+        return defaultValue
+    }
+
+    private static func intValue(forKey key: String, defaults: UserDefaults, sharedDefaults: UserDefaults?) -> Int? {
+        if let value = defaults.object(forKey: key) as? Int {
+            return value
+        }
+        if let value = sharedDefaults?.object(forKey: key) as? Int {
+            return value
+        }
+        return nil
+    }
+
+    private static func dateValue(forKey key: String, defaults: UserDefaults, sharedDefaults: UserDefaults?) -> Date? {
+        if let value = defaults.object(forKey: key) as? Date {
+            return value
+        }
+        if let value = sharedDefaults?.object(forKey: key) as? Date {
+            return value
+        }
+        return nil
+    }
+
+    private static func jsonValue<T: Decodable>(
+        forKey key: String,
+        defaults: UserDefaults,
+        sharedDefaults: UserDefaults?
+    ) -> T? {
+        if let local: T = defaults.json(forKey: key) {
+            return local
+        }
+        if let shared: T = sharedDefaults?.json(forKey: key) {
+            return shared
+        }
+        return nil
     }
 
     /// Sets the attachment cache limit for a given account.
@@ -240,11 +434,18 @@ public final class SettingsStore {
         quietHoursEnabled = false
         quietHoursStart = 1320
         quietHoursEnd = 420
+        backgroundAlertsEnabled = true
+        macLoginItemHelperEnabled = false
+        lastBackgroundCheckAt = nil
+        lastBackgroundAlertAt = nil
+        mainAppHeartbeatAt = nil
         attachmentCacheLimits = [:]
         blockRemoteImages = false
         blockTrackingPixels = false
         isOnboardingComplete = false
         defaultSendingAccountId = nil
+        selectedThemeId = "default"
+        fontSize = .medium
     }
 
     // MARK: - Constants
@@ -272,11 +473,18 @@ public final class SettingsStore {
         static let quietHoursEnabled = "quietHoursEnabled"
         static let quietHoursStart = "quietHoursStart"
         static let quietHoursEnd = "quietHoursEnd"
+        static let backgroundAlertsEnabled = "backgroundAlertsEnabled"
+        static let macLoginItemHelperEnabled = "macLoginItemHelperEnabled"
+        static let lastBackgroundCheckAt = "lastBackgroundCheckAt"
+        static let lastBackgroundAlertAt = "lastBackgroundAlertAt"
+        static let mainAppHeartbeatAt = "mainAppHeartbeatAt"
         static let attachmentCacheLimits = "attachmentCacheLimits"
         static let blockRemoteImages = "blockRemoteImages"
         static let blockTrackingPixels = "blockTrackingPixels"
         static let isOnboardingComplete = "isOnboardingComplete"
         static let defaultSendingAccountId = "defaultSendingAccountId"
+        static let selectedThemeId = "selectedThemeId"
+        static let fontSize = "fontSize"
     }
 }
 

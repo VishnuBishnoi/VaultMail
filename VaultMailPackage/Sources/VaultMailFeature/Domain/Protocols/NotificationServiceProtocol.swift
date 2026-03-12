@@ -44,6 +44,13 @@ public protocol NotificationServiceProtocol {
     /// Spec ref: NOTIF-03, NOTIF-04
     func processNewEmails(_ emails: [Email], fromBackground: Bool) async
 
+    /// Process newly fetched emails and return a delivery summary.
+    ///
+    /// Additive reporting API used by background orchestration for diagnostics
+    /// and timestamp bookkeeping. Existing callers can continue using
+    /// `processNewEmails(_:fromBackground:)`.
+    func processNewEmailsReporting(_ emails: [Email], fromBackground: Bool) async -> NotificationDeliveryReport
+
     // MARK: - Notification Removal
 
     /// Remove delivered notifications for specific email IDs.
@@ -108,4 +115,11 @@ public protocol NotificationServiceProtocol {
     /// Run the filter pipeline diagnostics and return a human-readable result.
     func diagnoseFilter(for email: Email) async -> String
     #endif
+}
+
+public extension NotificationServiceProtocol {
+    func processNewEmailsReporting(_ emails: [Email], fromBackground: Bool) async -> NotificationDeliveryReport {
+        await processNewEmails(emails, fromBackground: fromBackground)
+        return .empty
+    }
 }

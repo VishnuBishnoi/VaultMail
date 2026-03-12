@@ -125,6 +125,8 @@ public enum HTMLSanitizer {
 
         // --- Phase 0b: Strip raw MIME multipart framing ---
         result = MIMEDecoder.stripMIMEFramingForHTML(result)
+        // --- Phase 0c: Clean quoted-printable soft-break artifacts ---
+        result = stripQuotedPrintableSoftBreakArtifacts(result)
 
         // --- Phase 1: Strip tags WITH their content ---
         result = stripTagsWithContent(result, tags: ["script", "noscript"])
@@ -189,6 +191,7 @@ public enum HTMLSanitizer {
         <head>\
         <meta charset="utf-8">\
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">\
+        <meta name="color-scheme" content="light">\
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src \(imgSourcePolicy);">\
         <style>\
         *{box-sizing:border-box;max-width:100vw!important;}\
@@ -199,12 +202,15 @@ public enum HTMLSanitizer {
         min-width:0!important;\
         -webkit-text-size-adjust:none;\
         overflow-x:hidden;\
+        background:#ffffff!important;\
+        color:#1a1a1a!important;\
         }\
         body{\
         font-size:\(sizeString)pt;\
         font-family:-apple-system,system-ui,sans-serif;\
         line-height:1.5;\
         color:#1a1a1a;\
+        background:#ffffff;\
         word-wrap:break-word;\
         overflow-wrap:break-word;\
         padding:0 2px;\
@@ -362,6 +368,37 @@ public enum HTMLSanitizer {
                 options: [.regularExpression, .caseInsensitive]
             )
         }
+        return result
+    }
+
+    /// Removes quoted-printable soft-wrap artifacts that can leak into rendered
+    /// HTML when line endings were normalized before decode.
+    ///
+    /// Examples:
+    /// - `"...unsubscribe=\r\n</p>"` -> `"...unsubscribe</p>"`
+    /// - `"...unsubscribe="` -> `"...unsubscribe"`
+    private static func stripQuotedPrintableSoftBreakArtifacts(_ html: String) -> String {
+        var result = html
+            .replacingOccurrences(of: "=\r\n", with: "")
+            .replacingOccurrences(of: "=\n", with: "")
+            .replacingOccurrences(of: "=\r", with: "")
+
+        // If a dangling '=' survived before a tag boundary, drop it.
+        // Trade-off: this may also trim rare malformed attribute values like
+        // "value= </span>", but those are uncommon in real email HTML.
+        result = result.replacingOccurrences(
+            of: "=\\s*</",
+            with: "</",
+            options: [.regularExpression, .caseInsensitive]
+        )
+
+        // Drop a terminal dangling '=' that appears at end-of-document.
+        result = result.replacingOccurrences(
+            of: "=\\s*$",
+            with: "",
+            options: .regularExpression
+        )
+
         return result
     }
 

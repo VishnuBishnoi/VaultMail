@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		8B41F6832DEDD23B001A66F9 /* VaultMailFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 8B41F6822DEDD23B001A66F9 /* VaultMailFeature */; };
 		8B41F6852DEDD25C001A66F9 /* VaultMailFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 8B41F6842DEDD25C001A66F9 /* VaultMailFeature */; };
+		A1A1A1A12F40000100AA0001 /* VaultMailFeature in Frameworks */ = {isa = PBXBuildFile; productRef = A1A1A1A12F40000100AA0010 /* VaultMailFeature */; };
+		A1A1A1A12F40000100AA0002 /* MailBackgroundHelper.app in Embed Login Item */ = {isa = PBXBuildFile; fileRef = A1A1A1A12F40000100AA0004 /* MailBackgroundHelper.app */; platformFilters = (macos, ); settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -19,11 +21,33 @@
 			remoteGlobalIDString = 8B41F6442DEDD0D5001A66F9;
 			remoteInfo = VaultMail;
 		};
+		A1A1A1A12F40000100AA0003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8B41F63D2DEDD0D5001A66F9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1A1A1A12F40000100AA0009;
+			remoteInfo = MailBackgroundHelper;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A1A1A1A12F40000100AA0008 /* Embed Login Item */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Library/LoginItems";
+			dstSubfolderSpec = 16;
+			files = (
+				A1A1A1A12F40000100AA0002 /* MailBackgroundHelper.app in Embed Login Item */,
+			);
+			name = "Embed Login Item";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		8B41F6452DEDD0D5001A66F9 /* VaultMail.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VaultMail.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B41F65C2DEDD0D6001A66F9 /* VaultMail.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VaultMail.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1A1A1A12F40000100AA0004 /* MailBackgroundHelper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MailBackgroundHelper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -43,6 +67,13 @@
 				Tests.xcconfig,
 			);
 			target = 8B41F6442DEDD0D5001A66F9 /* VaultMail */;
+		};
+		A1A1A1A12F40000100AA0005 /* Exceptions for "MailBackgroundHelper" folder in "MailBackgroundHelper" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A1A1A1A12F40000100AA0009 /* MailBackgroundHelper */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -68,6 +99,14 @@
 			path = Config;
 			sourceTree = "<group>";
 		};
+		A1A1A1A12F40000100AA0006 /* MailBackgroundHelper */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1A1A1A12F40000100AA0005 /* Exceptions for "MailBackgroundHelper" folder in "MailBackgroundHelper" target */,
+			);
+			path = MailBackgroundHelper;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -87,6 +126,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1A1A1A12F40000100AA0007 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1A1A1A12F40000100AA0001 /* VaultMailFeature in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -94,6 +141,7 @@
 			isa = PBXGroup;
 			children = (
 				8BD71C052DEE41D800CEDD92 /* Config */,
+				A1A1A1A12F40000100AA0006 /* MailBackgroundHelper */,
 				8B41F6472DEDD0D5001A66F9 /* VaultMail */,
 				8B41F65F2DEDD0D6001A66F9 /* VaultMailUITests */,
 				8B41F6812DEDD23B001A66F9 /* Frameworks */,
@@ -104,6 +152,7 @@
 		8B41F6462DEDD0D5001A66F9 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				A1A1A1A12F40000100AA0004 /* MailBackgroundHelper.app */,
 				8B41F6452DEDD0D5001A66F9 /* VaultMail.app */,
 				8B41F65C2DEDD0D6001A66F9 /* VaultMail.xctest */,
 			);
@@ -127,10 +176,12 @@
 				8B41F6412DEDD0D5001A66F9 /* Sources */,
 				8B41F6422DEDD0D5001A66F9 /* Frameworks */,
 				8B41F6432DEDD0D5001A66F9 /* Resources */,
+				A1A1A1A12F40000100AA0008 /* Embed Login Item */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A1A1A1A12F40000100AA000C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				8B41F6472DEDD0D5001A66F9 /* VaultMail */,
@@ -168,6 +219,29 @@
 			productReference = 8B41F65C2DEDD0D6001A66F9 /* VaultMail.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		A1A1A1A12F40000100AA0009 /* MailBackgroundHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1A1A1A12F40000100AA000F /* Build configuration list for PBXNativeTarget "MailBackgroundHelper" */;
+			buildPhases = (
+				A1A1A1A12F40000100AA000B /* Sources */,
+				A1A1A1A12F40000100AA0007 /* Frameworks */,
+				A1A1A1A12F40000100AA000A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A1A1A1A12F40000100AA0006 /* MailBackgroundHelper */,
+			);
+			name = MailBackgroundHelper;
+			packageProductDependencies = (
+				A1A1A1A12F40000100AA0010 /* VaultMailFeature */,
+			);
+			productName = MailBackgroundHelper;
+			productReference = A1A1A1A12F40000100AA0004 /* MailBackgroundHelper.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -185,6 +259,9 @@
 						CreatedOnToolsVersion = 16.3;
 						TestTargetID = 8B41F6442DEDD0D5001A66F9;
 					};
+					A1A1A1A12F40000100AA0009 = {
+						CreatedOnToolsVersion = 16.3;
+					};
 				};
 			};
 			buildConfigurationList = 8B41F6402DEDD0D5001A66F9 /* Build configuration list for PBXProject "VaultMail" */;
@@ -197,12 +274,14 @@
 			mainGroup = 8B41F63C2DEDD0D5001A66F9;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				A1A1A1A12F40000100AA0011 /* XCLocalSwiftPackageReference "VaultMailPackage" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8B41F6462DEDD0D5001A66F9 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				A1A1A1A12F40000100AA0009 /* MailBackgroundHelper */,
 				8B41F6442DEDD0D5001A66F9 /* VaultMail */,
 				8B41F65B2DEDD0D6001A66F9 /* VaultMailUITests */,
 			);
@@ -218,6 +297,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		8B41F65A2DEDD0D6001A66F9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1A1A1A12F40000100AA000A /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -241,6 +327,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1A1A1A12F40000100AA000B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -248,6 +341,14 @@
 			isa = PBXTargetDependency;
 			target = 8B41F6442DEDD0D5001A66F9 /* VaultMail */;
 			targetProxy = 8B41F65D2DEDD0D6001A66F9 /* PBXContainerItemProxy */;
+		};
+		A1A1A1A12F40000100AA000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilters = (
+				macos,
+			);
+			target = A1A1A1A12F40000100AA0009 /* MailBackgroundHelper */;
+			targetProxy = A1A1A1A12F40000100AA0003 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -383,9 +484,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = Y5JMZSQP2T;
+				DEVELOPMENT_TEAM = "$(VAULTMAIL_DEVELOPMENT_TEAM)";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
@@ -394,6 +495,7 @@
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
+					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -413,9 +515,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = Y5JMZSQP2T;
+				DEVELOPMENT_TEAM = "$(VAULTMAIL_DEVELOPMENT_TEAM)";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
@@ -424,6 +527,7 @@
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
+					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -464,6 +568,72 @@
 			};
 			name = Release;
 		};
+		A1A1A1A12F40000100AA000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 8BD71C052DEE41D800CEDD92 /* Config */;
+			baseConfigurationReferenceRelativePath = Debug.xcconfig;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MailBackgroundHelper/MailBackgroundHelper.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "$(VAULTMAIL_DEVELOPMENT_TEAM)";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MailBackgroundHelper/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VAULTMAIL_HELPER_BUNDLE_IDENTIFIER)";
+				PRODUCT_NAME = MailBackgroundHelper;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A1A1A1A12F40000100AA000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 8BD71C052DEE41D800CEDD92 /* Config */;
+			baseConfigurationReferenceRelativePath = Release.xcconfig;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MailBackgroundHelper/MailBackgroundHelper.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "$(VAULTMAIL_DEVELOPMENT_TEAM)";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MailBackgroundHelper/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VAULTMAIL_HELPER_BUNDLE_IDENTIFIER)";
+				PRODUCT_NAME = MailBackgroundHelper;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -494,15 +664,38 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A1A1A1A12F40000100AA000F /* Build configuration list for PBXNativeTarget "MailBackgroundHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1A1A1A12F40000100AA000D /* Debug */,
+				A1A1A1A12F40000100AA000E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A1A1A1A12F40000100AA0011 /* XCLocalSwiftPackageReference "VaultMailPackage" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = VaultMailPackage;
+		};
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		8B41F6822DEDD23B001A66F9 /* VaultMailFeature */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = A1A1A1A12F40000100AA0011 /* XCLocalSwiftPackageReference "VaultMailPackage" */;
 			productName = VaultMailFeature;
 		};
 		8B41F6842DEDD25C001A66F9 /* VaultMailFeature */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = A1A1A1A12F40000100AA0011 /* XCLocalSwiftPackageReference "VaultMailPackage" */;
+			productName = VaultMailFeature;
+		};
+		A1A1A1A12F40000100AA0010 /* VaultMailFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1A1A1A12F40000100AA0011 /* XCLocalSwiftPackageReference "VaultMailPackage" */;
 			productName = VaultMailFeature;
 		};
 /* End XCSwiftPackageProductDependency section */
